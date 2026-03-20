@@ -433,6 +433,9 @@ export async function createScenario(venueId: string, scenario: CostScenario) {
 	try {
 		const { overrides, ...dbScenario } = scenario;
 		await supabase.from('cost_scenarios').insert(dbScenario);
+		if (overrides && overrides.length > 0) {
+			await supabase.from('scenario_overrides').insert(overrides);
+		}
 	} catch (err) {
 		console.error('Supabase error:', err);
 	}

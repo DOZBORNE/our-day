@@ -325,6 +325,23 @@
             venue.id,
             newScenarioName.trim(),
         );
+        // Pre-populate overrides: optional items start as excluded
+        const optionalOverrides: ScenarioOverride[] = [];
+        for (const cat of rawCategories) {
+            for (const li of cat.line_items ?? []) {
+                if (!li.included) {
+                    optionalOverrides.push({
+                        id: genId(),
+                        scenario_id: scenario.id,
+                        line_item_id: li.id,
+                        applicable: false,
+                        cost_override: null,
+                        notes_override: null,
+                    });
+                }
+            }
+        }
+        scenario.overrides = optionalOverrides;
         createScenario(venue.id, scenario);
         activeScenarioId = scenario.id;
         newScenarioName = "";
