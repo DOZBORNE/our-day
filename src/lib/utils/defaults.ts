@@ -1,4 +1,4 @@
-import type { CostCategory, LineItem, CostCategoryType, Venue, ContractInfo } from '$lib/types';
+import type { CostCategory, LineItem, CostCategoryType, Venue, ContractInfo, CostScenario } from '$lib/types';
 
 let counter = 0;
 export function genId(): string {
@@ -19,7 +19,10 @@ function li(
 		cost,
 		quantity: 1,
 		calculation_type: 'flat',
+		group_size: 1,
+		percentage_target: null,
 		included: true,
+		applicable: true,
 		notes: '',
 		sort_order: 0,
 		...opts
@@ -29,7 +32,7 @@ function li(
 interface CategoryDef {
 	type: CostCategoryType;
 	name: string;
-	items: { name: string; calc?: LineItem['calculation_type'] }[];
+	items: { name: string; calc?: LineItem['calculation_type']; groupSize?: number }[];
 }
 
 const CATEGORY_DEFS: CategoryDef[] = [
@@ -53,6 +56,7 @@ const CATEGORY_DEFS: CategoryDef[] = [
 		name: 'Catering',
 		items: [
 			{ name: 'Per-Plate Cost', calc: 'per-person' },
+			{ name: 'Extra Guests Fee', calc: 'per-group', groupSize: 25 },
 			{ name: 'F&B Minimum' },
 			{ name: 'Tasting Fee' },
 			{ name: 'Late-Night Snacks' }
@@ -176,6 +180,7 @@ export function createDefaultCategories(venueId: string): CostCategory[] {
 			line_items: def.items.map((item, j) =>
 				li(catId, item.name, 0, {
 					calculation_type: item.calc || 'flat',
+					group_size: item.groupSize || 1,
 					sort_order: j,
 					included: true
 				})
@@ -211,8 +216,21 @@ export function createDefaultVenue(): Venue {
 		image_url: '',
 		attachments: [],
 		cost_categories: createDefaultCategories(id),
+		cost_scenarios: [],
 		venue_dates: [],
 		contract: createDefaultContract(id)
+	};
+}
+
+export function createDefaultScenario(venueId: string, name: string): CostScenario {
+	return {
+		id: genId(),
+		venue_id: venueId,
+		name,
+		description: '',
+		is_locked: false,
+		created_at: new Date().toISOString(),
+		overrides: []
 	};
 }
 

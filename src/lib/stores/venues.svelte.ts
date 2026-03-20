@@ -2,6 +2,8 @@ import { supabase } from '$lib/supabase';
 import type {
 	Venue,
 	CostCategory,
+	CostScenario,
+	ScenarioOverride,
 	LineItem,
 	VenueDate,
 	ContractInfo,
@@ -32,6 +34,7 @@ export async function loadVenues() {
 				`
 				*,
 				cost_categories(*, line_items(*)),
+				cost_scenarios(*, scenario_overrides(*)),
 				venue_dates(*),
 				contracts(*, payment_milestones(*))
 			`
@@ -49,16 +52,27 @@ export async function loadVenues() {
 					.sort((a: CostCategory, b: CostCategory) => a.sort_order - b.sort_order)
 					.map((cat: CostCategory) => ({
 						...cat,
-						line_items: (cat.line_items || []).sort((a: LineItem, b: LineItem) => a.sort_order - b.sort_order)
+						line_items: (cat.line_items || []).map((li: LineItem) => ({
+							...li,
+							group_size: li.group_size ?? 1,
+							percentage_target: li.percentage_target ?? null,
+							applicable: li.applicable ?? true
+						})).sort((a: LineItem, b: LineItem) => a.sort_order - b.sort_order)
 					})),
+				cost_scenarios: ((v.cost_scenarios as CostScenario[]) || []).map(
+					({ scenario_overrides, ...s }: CostScenario & { scenario_overrides?: ScenarioOverride[] }) => ({
+						...s,
+						overrides: scenario_overrides || s.overrides || []
+					})
+				),
 				venue_dates: (v.venue_dates as VenueDate[]) || [],
 				contract: Array.isArray(v.contracts)
 					? (v.contracts as ContractInfo[])[0] || null
 					: v.contracts || null
 			})) as Venue[];
 		}
-	} catch {
-		console.warn('Supabase not configured, using local venues');
+	} catch (err) {
+		console.error('Error loading venues:', err);
 	}
 
 	loaded = true;
@@ -104,14 +118,14 @@ export async function createVenue(venueData: Partial<Venue> = {}): Promise<Venue
 		try {
 			const {
 				cost_categories,
+				cost_scenarios,
 				venue_dates,
 				contract,
 				...dbVenue
 			} = venue;
 
-			const { data, error } = await supabase.from('venues').insert(dbVenue).select().single();
+			const { error } = await supabase.from('venues').insert(dbVenue);
 			if (error) console.error('Error creating venue:', error);
-			else if (data) venue.id = data.id;
 
 			// Batch insert all categories at once
 			if (cost_categories && cost_categories.length > 0) {
@@ -156,11 +170,11 @@ export async function updateVenue(id: string, updates: Partial<Venue>) {
 	};
 
 	try {
-		const { cost_categories, venue_dates, contract, ...dbUpdates } = updates;
+		const { cost_categories, cost_scenarios, venue_dates, contract, ...dbUpdates } = updates;
 		dbUpdates.updated_at = new Date().toISOString();
 		await supabase.from('venues').update(dbUpdates).eq('id', id);
-	} catch {
-		// Local-only mode
+	} catch (err) {
+		console.error('Supabase error:', err);
 	}
 }
 
@@ -169,8 +183,8 @@ export async function deleteVenue(id: string) {
 
 	try {
 		await supabase.from('venues').delete().eq('id', id);
-	} catch {
-		// Local-only mode
+	} catch (err) {
+		console.error('Supabase error:', err);
 	}
 }
 
@@ -194,8 +208,8 @@ export async function updateCostCategory(
 		if (Object.keys(catData).length > 0) {
 			await supabase.from('cost_categories').update(catData).eq('id', categoryId);
 		}
-	} catch {
-		// Local-only
+	} catch (err) {
+		console.error('Supabase error:', err);
 	}
 }
 
@@ -218,8 +232,8 @@ export async function updateLineItem(
 
 	try {
 		await supabase.from('line_items').update(updates).eq('id', itemId);
-	} catch {
-		// Local-only
+	} catch (err) {
+		console.error('Supabase error:', err);
 	}
 }
 
@@ -235,8 +249,8 @@ export async function addLineItem(venueId: string, categoryId: string, item: Lin
 
 	try {
 		await supabase.from('line_items').insert(item);
-	} catch {
-		// Local-only
+	} catch (err) {
+		console.error('Supabase error:', err);
 	}
 }
 
@@ -251,8 +265,8 @@ export async function removeLineItem(venueId: string, categoryId: string, itemId
 
 	try {
 		await supabase.from('line_items').delete().eq('id', itemId);
-	} catch {
-		// Local-only
+	} catch (err) {
+		console.error('Supabase error:', err);
 	}
 }
 
@@ -277,13 +291,16 @@ export async function reorderLineItems(venueId: string, categoryId: string, newI
 			cost: li.cost,
 			quantity: li.quantity,
 			calculation_type: li.calculation_type,
+			group_size: li.group_size,
+			percentage_target: li.percentage_target,
 			included: li.included,
+			applicable: li.applicable,
 			notes: li.notes,
 			sort_order: li.sort_order
 		}));
 		await supabase.from('line_items').upsert(rows);
-	} catch {
-		// Local-only
+	} catch (err) {
+		console.error('Supabase error:', err);
 	}
 }
 
@@ -298,8 +315,8 @@ export async function addVenueDate(venueId: string, dateData: VenueDate) {
 
 	try {
 		await supabase.from('venue_dates').insert(dateData);
-	} catch {
-		// Local-only
+	} catch (err) {
+		console.error('Supabase error:', err);
 	}
 }
 
@@ -314,8 +331,8 @@ export async function updateVenueDate(venueId: string, dateId: string, updates: 
 
 	try {
 		await supabase.from('venue_dates').update(updates).eq('id', dateId);
-	} catch {
-		// Local-only
+	} catch (err) {
+		console.error('Supabase error:', err);
 	}
 }
 
@@ -327,8 +344,8 @@ export async function removeVenueDate(venueId: string, dateId: string) {
 
 	try {
 		await supabase.from('venue_dates').delete().eq('id', dateId);
-	} catch {
-		// Local-only
+	} catch (err) {
+		console.error('Supabase error:', err);
 	}
 }
 
@@ -347,8 +364,8 @@ export async function updateContract(venueId: string, updates: Partial<ContractI
 		if (Object.keys(contractData).length > 0 && venue.contract) {
 			await supabase.from('contracts').update(contractData).eq('id', venue.contract.id);
 		}
-	} catch {
-		// Local-only
+	} catch (err) {
+		console.error('Supabase error:', err);
 	}
 }
 
@@ -361,8 +378,8 @@ export async function addPaymentMilestone(venueId: string, milestone: PaymentMil
 
 	try {
 		await supabase.from('payment_milestones').insert(milestone);
-	} catch {
-		// Local-only
+	} catch (err) {
+		console.error('Supabase error:', err);
 	}
 }
 
@@ -384,8 +401,8 @@ export async function updatePaymentMilestone(
 
 	try {
 		await supabase.from('payment_milestones').update(updates).eq('id', milestoneId);
-	} catch {
-		// Local-only
+	} catch (err) {
+		console.error('Supabase error:', err);
 	}
 }
 
@@ -399,8 +416,116 @@ export async function removePaymentMilestone(venueId: string, milestoneId: strin
 
 	try {
 		await supabase.from('payment_milestones').delete().eq('id', milestoneId);
-	} catch {
-		// Local-only
+	} catch (err) {
+		console.error('Supabase error:', err);
+	}
+}
+
+// ── Scenario Operations ──
+
+export async function createScenario(venueId: string, scenario: CostScenario) {
+	const venue = venues.find((v) => v.id === venueId);
+	if (!venue) return;
+
+	if (!venue.cost_scenarios) venue.cost_scenarios = [];
+	venue.cost_scenarios = [...venue.cost_scenarios, scenario];
+
+	try {
+		const { overrides, ...dbScenario } = scenario;
+		await supabase.from('cost_scenarios').insert(dbScenario);
+	} catch (err) {
+		console.error('Supabase error:', err);
+	}
+}
+
+export async function updateScenario(
+	venueId: string,
+	scenarioId: string,
+	updates: Partial<CostScenario>
+) {
+	const venue = venues.find((v) => v.id === venueId);
+	if (!venue?.cost_scenarios) return;
+
+	const idx = venue.cost_scenarios.findIndex((s) => s.id === scenarioId);
+	if (idx === -1) return;
+
+	venue.cost_scenarios[idx] = { ...venue.cost_scenarios[idx], ...updates };
+
+	try {
+		const { overrides, ...dbUpdates } = updates;
+		if (Object.keys(dbUpdates).length > 0) {
+			await supabase.from('cost_scenarios').update(dbUpdates).eq('id', scenarioId);
+		}
+	} catch (err) {
+		console.error('Supabase error:', err);
+	}
+}
+
+export async function deleteScenario(venueId: string, scenarioId: string) {
+	const venue = venues.find((v) => v.id === venueId);
+	if (!venue?.cost_scenarios) return;
+
+	venue.cost_scenarios = venue.cost_scenarios.filter((s) => s.id !== scenarioId);
+
+	try {
+		await supabase.from('cost_scenarios').delete().eq('id', scenarioId);
+	} catch (err) {
+		console.error('Supabase error:', err);
+	}
+}
+
+export async function upsertScenarioOverride(
+	venueId: string,
+	scenarioId: string,
+	override: ScenarioOverride
+) {
+	const venue = venues.find((v) => v.id === venueId);
+	if (!venue?.cost_scenarios) return;
+
+	const scenario = venue.cost_scenarios.find((s) => s.id === scenarioId);
+	if (!scenario) return;
+
+	if (!scenario.overrides) scenario.overrides = [];
+	const existingIdx = scenario.overrides.findIndex(
+		(o) => o.line_item_id === override.line_item_id
+	);
+
+	if (existingIdx !== -1) {
+		scenario.overrides[existingIdx] = override;
+	} else {
+		scenario.overrides = [...scenario.overrides, override];
+	}
+
+	try {
+		await supabase.from('scenario_overrides').upsert(override, {
+			onConflict: 'scenario_id,line_item_id'
+		});
+	} catch (err) {
+		console.error('Supabase error:', err);
+	}
+}
+
+export async function removeScenarioOverride(
+	venueId: string,
+	scenarioId: string,
+	lineItemId: string
+) {
+	const venue = venues.find((v) => v.id === venueId);
+	if (!venue?.cost_scenarios) return;
+
+	const scenario = venue.cost_scenarios.find((s) => s.id === scenarioId);
+	if (!scenario?.overrides) return;
+
+	scenario.overrides = scenario.overrides.filter((o) => o.line_item_id !== lineItemId);
+
+	try {
+		await supabase
+			.from('scenario_overrides')
+			.delete()
+			.eq('scenario_id', scenarioId)
+			.eq('line_item_id', lineItemId);
+	} catch (err) {
+		console.error('Supabase error:', err);
 	}
 }
 
@@ -437,8 +562,8 @@ export async function assignVendorToCategory(
 		if (newItems.length > 0) {
 			await supabase.from('line_items').insert(newItems);
 		}
-	} catch {
-		// Local-only
+	} catch (err) {
+		console.error('Supabase error:', err);
 	}
 }
 
@@ -453,7 +578,7 @@ export async function detachVendorFromCategory(venueId: string, categoryId: stri
 
 	try {
 		await supabase.from('cost_categories').update({ vendor_id: null }).eq('id', categoryId);
-	} catch {
-		// Local-only
+	} catch (err) {
+		console.error('Supabase error:', err);
 	}
 }

@@ -19,6 +19,10 @@
         assignVendorToCategory,
         detachVendorFromCategory,
         reorderLineItems,
+        createScenario,
+        updateScenario,
+        deleteScenario,
+        upsertScenarioOverride,
     } from "$lib/stores/venues.svelte";
     import {
         getVendors,
@@ -31,6 +35,8 @@
         calculateVenueSubtotal,
         calculateFeesAndTaxes,
         calculateGrandTotal,
+        applyCategoryScenario,
+        resolvePercentageItemTotal,
     } from "$lib/utils/calculations";
     import {
         formatCurrency,
@@ -45,6 +51,8 @@
     import type {
         Venue,
         CostCategory,
+        CostScenario,
+        ScenarioOverride,
         LineItem,
         VenueDate,
         VenueType,
@@ -52,6 +60,7 @@
         PricingTier,
         DateStatus,
     } from "$lib/types";
+    import { createDefaultScenario } from "$lib/utils/defaults";
     import { COST_CATEGORY_LABELS } from "$lib/types";
     import { env } from "$env/dynamic/public";
     import Card from "$lib/components/ui/Card.svelte";
@@ -88,6 +97,11 @@
         Paperclip,
         Download,
         GripVertical,
+        Layers,
+        GitCompare,
+        Lock,
+        Eye,
+        EyeOff,
     } from "lucide-svelte";
 
     // ── State ──
@@ -107,8 +121,24 @@
     let budget = $derived(getBudget());
     let guestCount = $derived(budget.guest_count);
 
+    // ── Scenario state ──
+    let activeScenarioId = $state<string | null>(null);
+    let showCompare = $state(false);
+    let showNewScenarioInput = $state(false);
+    let newScenarioName = $state("");
+
+    let scenarios = $derived(venue?.cost_scenarios ?? []);
+    let activeScenario = $derived(
+        activeScenarioId
+            ? scenarios.find((s) => s.id === activeScenarioId) ?? null
+            : null,
+    );
+
     // ── Pricing derived ──
-    let categories = $derived(venue?.cost_categories ?? []);
+    let rawCategories = $derived(venue?.cost_categories ?? []);
+    let categories = $derived(
+        applyCategoryScenario(rawCategories, activeScenario),
+    );
     let subtotal = $derived(calculateVenueSubtotal(categories, guestCount));
     let fees = $derived(calculateFeesAndTaxes(categories, guestCount));
     let grandTotal = $derived(calculateGrandTotal(categories, guestCount));
@@ -273,7 +303,10 @@
             cost: 0,
             quantity: 1,
             calculation_type: "flat",
+            group_size: 1,
+            percentage_target: null,
             included: true,
+            applicable: true,
             notes: "",
             sort_order: sortOrder,
         };
@@ -283,6 +316,73 @@
     function handleRemoveLineItem(catId: string, itemId: string) {
         if (!venue) return;
         removeLineItem(venue.id, catId, itemId);
+    }
+
+    // ── Scenario handlers ──
+    function handleCreateScenario() {
+        if (!venue || !newScenarioName.trim()) return;
+        const scenario = createDefaultScenario(
+            venue.id,
+            newScenarioName.trim(),
+        );
+        createScenario(venue.id, scenario);
+        activeScenarioId = scenario.id;
+        newScenarioName = "";
+        showNewScenarioInput = false;
+        savedToast();
+    }
+
+    function handleDeleteScenario(scenarioId: string) {
+        if (!venue) return;
+        deleteScenario(venue.id, scenarioId);
+        if (activeScenarioId === scenarioId) activeScenarioId = null;
+        savedToast();
+    }
+
+    function handleScenarioToggleApplicable(
+        lineItemId: string,
+        currentApplicable: boolean,
+    ) {
+        if (!venue || !activeScenario) return;
+        const override: ScenarioOverride = {
+            id: genId(),
+            scenario_id: activeScenario.id,
+            line_item_id: lineItemId,
+            applicable: !currentApplicable,
+            cost_override: null,
+            notes_override: null,
+        };
+        // Check if there's an existing override to preserve cost/notes
+        const existing = activeScenario.overrides?.find(
+            (o) => o.line_item_id === lineItemId,
+        );
+        if (existing) {
+            override.id = existing.id;
+            override.cost_override = existing.cost_override;
+            override.notes_override = existing.notes_override;
+        }
+        upsertScenarioOverride(venue.id, activeScenario.id, override);
+        savedToast();
+    }
+
+    function handleScenarioCostOverride(
+        lineItemId: string,
+        cost: number,
+    ) {
+        if (!venue || !activeScenario) return;
+        const existing = activeScenario.overrides?.find(
+            (o) => o.line_item_id === lineItemId,
+        );
+        const override: ScenarioOverride = {
+            id: existing?.id ?? genId(),
+            scenario_id: activeScenario.id,
+            line_item_id: lineItemId,
+            applicable: existing?.applicable ?? true,
+            cost_override: cost,
+            notes_override: existing?.notes_override ?? null,
+        };
+        upsertScenarioOverride(venue.id, activeScenario.id, override);
+        savedToast();
     }
 
     // ── Drag-and-drop reordering ──
@@ -418,20 +518,6 @@
     function removeCon(idx: number) {
         if (!venue) return;
         updateVenue(venue.id, { cons: venue.cons.filter((_, i) => i !== idx) });
-    }
-
-    let externalLinks = $state<string[]>([]);
-    $effect(() => {
-        if (venue) externalLinks = [];
-    });
-    function addLink() {
-        externalLinks = [...externalLinks, ""];
-    }
-    function updateLink(idx: number, val: string) {
-        externalLinks[idx] = val;
-    }
-    function removeLink(idx: number) {
-        externalLinks = externalLinks.filter((_, i) => i !== idx);
     }
 
     function getVendorName(vendorId: string | null): string {
@@ -1092,19 +1178,160 @@
                                 .filter(
                                     (li) =>
                                         !li.included &&
+                                        li.applicable !== false &&
                                         li.calculation_type !== "percentage",
                                 )
                                 .reduce((s, li) => {
                                     if (li.calculation_type === "per-person")
-                                        return (
-                                            s +
-                                            li.cost * guestCount * li.quantity
-                                        );
+                                        return s + li.cost * guestCount;
+                                    if (li.calculation_type === "per-group")
+                                        return s + li.cost * li.quantity;
                                     return s + li.cost * li.quantity;
                                 }, 0)
                         );
                     }, 0)}
                     <div class="space-y-4">
+                        <!-- ── Scenario Selector Bar ── -->
+                        <div class="bg-surface-lowest rounded-xl border border-outline-variant p-3">
+                            <div class="flex items-center gap-3 flex-wrap">
+                                <div class="flex items-center gap-2 text-xs text-on-surface-variant">
+                                    <Layers size={14} class="text-secondary" />
+                                    <span class="font-medium uppercase tracking-wide text-secondary">Scenario</span>
+                                </div>
+
+                                <div class="flex items-center gap-1.5 flex-wrap flex-1">
+                                    <button
+                                        onclick={() => { activeScenarioId = null; showCompare = false; }}
+                                        class="px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer
+                                            {activeScenarioId === null && !showCompare
+                                                ? 'bg-primary text-on-primary shadow-sm'
+                                                : 'bg-surface-high text-on-surface-variant hover:bg-surface-highest'}"
+                                    >
+                                        Base Pricing
+                                    </button>
+
+                                    {#each scenarios as scenario (scenario.id)}
+                                        <div class="relative group/scenario">
+                                            <button
+                                                onclick={() => { activeScenarioId = scenario.id; showCompare = false; }}
+                                                class="px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer flex items-center gap-1.5
+                                                    {activeScenarioId === scenario.id && !showCompare
+                                                        ? 'bg-primary text-on-primary shadow-sm'
+                                                        : 'bg-surface-high text-on-surface-variant hover:bg-surface-highest'}"
+                                            >
+                                                {#if scenario.is_locked}<Lock size={10} />{/if}
+                                                {scenario.name}
+                                            </button>
+                                            <button
+                                                onclick={() => handleDeleteScenario(scenario.id)}
+                                                class="absolute -top-1.5 -right-1.5 p-0.5 rounded-full bg-error text-on-error opacity-0 group-hover/scenario:opacity-100 transition cursor-pointer"
+                                                title="Delete scenario"
+                                            >
+                                                <X size={10} />
+                                            </button>
+                                        </div>
+                                    {/each}
+
+                                    {#if showNewScenarioInput}
+                                        <form
+                                            class="flex items-center gap-1.5"
+                                            onsubmit={(e) => { e.preventDefault(); handleCreateScenario(); }}
+                                        >
+                                            <input
+                                                type="text"
+                                                bind:value={newScenarioName}
+                                                placeholder="Scenario name..."
+                                                class="px-2 py-1 rounded-lg text-xs bg-surface-highest border border-outline-variant text-on-surface focus:border-primary focus:outline-none w-36"
+                                            />
+                                            <button
+                                                type="submit"
+                                                class="p-1 rounded-lg bg-primary text-on-primary cursor-pointer"
+                                            >
+                                                <Check size={12} />
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onclick={() => { showNewScenarioInput = false; newScenarioName = ""; }}
+                                                class="p-1 rounded-lg bg-surface-highest text-on-surface-variant cursor-pointer"
+                                            >
+                                                <X size={12} />
+                                            </button>
+                                        </form>
+                                    {:else}
+                                        <button
+                                            onclick={() => { showNewScenarioInput = true; }}
+                                            class="px-2 py-1.5 rounded-lg text-xs font-medium bg-surface-high text-on-surface-variant hover:bg-surface-highest transition cursor-pointer flex items-center gap-1 border border-dashed border-outline-variant"
+                                        >
+                                            <Plus size={12} />
+                                            New
+                                        </button>
+                                    {/if}
+                                </div>
+
+                                {#if scenarios.length > 0}
+                                    <button
+                                        onclick={() => { showCompare = !showCompare; }}
+                                        class="px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer flex items-center gap-1.5
+                                            {showCompare
+                                                ? 'bg-secondary text-on-secondary shadow-sm'
+                                                : 'bg-surface-high text-on-surface-variant hover:bg-surface-highest'}"
+                                    >
+                                        <GitCompare size={12} />
+                                        Compare
+                                    </button>
+                                {/if}
+                            </div>
+
+                            {#if activeScenario}
+                                <div class="mt-2 pt-2 border-t border-outline-variant/50 flex items-center gap-2 text-xs text-on-surface-variant">
+                                    <span class="italic">Viewing scenario overrides — toggle items on/off for this configuration</span>
+                                </div>
+                            {/if}
+                        </div>
+
+                        <!-- ── Compare View ── -->
+                        {#if showCompare}
+                            <div class="bg-surface-lowest rounded-xl border border-outline-variant overflow-hidden">
+                                <div class="p-4">
+                                    <h3 class="text-sm font-bold text-on-surface mb-3 flex items-center gap-2">
+                                        <GitCompare size={16} class="text-secondary" />
+                                        Scenario Comparison
+                                    </h3>
+                                    {#each [calculateGrandTotal(rawCategories, guestCount)] as baseTotal}
+                                        <div class="grid gap-3" style="grid-template-columns: repeat({1 + scenarios.length}, minmax(0, 1fr));">
+                                            <!-- Header row -->
+                                            <div class="text-xs font-mono uppercase tracking-widest text-secondary py-2 px-3 bg-surface-low rounded-lg">
+                                                Base Pricing
+                                            </div>
+                                            {#each scenarios as scenario (scenario.id)}
+                                                <div class="text-xs font-mono uppercase tracking-widest text-secondary py-2 px-3 bg-surface-low rounded-lg">
+                                                    {scenario.name}
+                                                </div>
+                                            {/each}
+
+                                            <!-- Totals row -->
+                                            <div class="px-3 py-3 bg-surface rounded-lg">
+                                                <div class="text-lg font-bold text-primary font-mono tabular-nums">{formatCurrency(baseTotal)}</div>
+                                                <div class="text-[10px] text-on-surface-variant mt-1">per guest: {formatCurrency(baseTotal / (guestCount || 1))}</div>
+                                            </div>
+                                            {#each scenarios as scenario (scenario.id)}
+                                                {@const scenarioCats = applyCategoryScenario(rawCategories, scenario)}
+                                                {@const scenarioTotal = calculateGrandTotal(scenarioCats, guestCount)}
+                                                {@const diff = scenarioTotal - baseTotal}
+                                                <div class="px-3 py-3 bg-surface rounded-lg">
+                                                    <div class="text-lg font-bold text-primary font-mono tabular-nums">{formatCurrency(scenarioTotal)}</div>
+                                                    <div class="text-[10px] mt-1 {diff > 0 ? 'text-error' : diff < 0 ? 'text-tertiary' : 'text-on-surface-variant'}">
+                                                        {diff > 0 ? '+' : ''}{formatCurrency(diff)} vs base
+                                                    </div>
+                                                    <div class="text-[10px] text-on-surface-variant mt-0.5">per guest: {formatCurrency(scenarioTotal / (guestCount || 1))}</div>
+                                                </div>
+                                            {/each}
+                                        </div>
+                                    {/each}
+                                </div>
+                            </div>
+                        {/if}
+
                         <div
                             class="bg-surface-lowest rounded-xl border border-outline-variant overflow-hidden"
                         >
@@ -1121,8 +1348,8 @@
                                                 >Cost ($)</th
                                             >
                                             <th
-                                                class="py-2.5 px-2 text-left font-mono text-[10px] uppercase tracking-widest text-secondary w-16"
-                                                >Qty</th
+                                                class="py-2.5 px-2 text-left font-mono text-[10px] uppercase tracking-widest text-secondary w-20"
+                                                >Qty / Size</th
                                             >
                                             <th
                                                 class="py-2.5 px-2 text-left font-mono text-[10px] uppercase tracking-widest text-secondary w-28"
@@ -1238,11 +1465,9 @@
                                             <!-- Line items -->
                                             {#each category.line_items ?? [] as item (item.id)}
                                                 {@const itemTotal =
-                                                    calculateLineItemTotal(
-                                                        item,
-                                                        guestCount,
-                                                        subtotal,
-                                                    )}
+                                                    item.calculation_type === "percentage"
+                                                        ? resolvePercentageItemTotal(item, categories, guestCount)
+                                                        : calculateLineItemTotal(item, guestCount)}
                                                 {@const isDragOver =
                                                     dragOverItemId ===
                                                         item.id &&
@@ -1251,9 +1476,9 @@
                                                     dragItemId !== item.id}
                                                 <!-- svelte-ignore a11y_no_static_element_interactions -->
                                                 <tr
-                                                    class="border-b border-outline-variant/50 hover:bg-surface-low/50 group/row {!item.included
-                                                        ? 'opacity-60'
-                                                        : ''} {isDragOver
+                                                    class="border-b border-outline-variant/50 hover:bg-surface-low/50 group/row {activeScenario
+                                                        ? (item.applicable === false ? 'opacity-40' : '')
+                                                        : (!item.included ? 'opacity-60' : '')} {isDragOver
                                                         ? 'border-t-2 border-t-primary'
                                                         : ''}"
                                                     draggable="true"
@@ -1323,86 +1548,162 @@
                                                         />
                                                     </td>
                                                     <td class="py-1.5 px-2">
-                                                        <input
-                                                            type="number"
-                                                            value={item.quantity}
-                                                            min="0"
-                                                            class="w-full bg-transparent text-sm text-on-surface font-mono border-0 border-b border-transparent hover:border-outline-variant focus:border-primary focus:outline-none px-0 py-0.5 transition tabular-nums"
-                                                            onblur={(e) =>
-                                                                handleLineItemBlur(
-                                                                    category.id,
-                                                                    item.id,
-                                                                    "quantity",
-                                                                    Number(
-                                                                        e
-                                                                            .currentTarget
-                                                                            .value,
-                                                                    ),
-                                                                )}
-                                                        />
-                                                    </td>
-                                                    <td class="py-1.5 px-2">
-                                                        <div class="relative">
-                                                            <span
-                                                                class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-medium bg-surface-highest text-on-surface-variant pointer-events-none"
-                                                            >
-                                                                {#if item.calculation_type === "flat"}FLAT{:else if item.calculation_type === "per-person"}P/P{:else}%{/if}
-                                                            </span>
-                                                            <select
-                                                                value={item.calculation_type}
-                                                                class="absolute inset-0 opacity-0 w-full cursor-pointer"
-                                                                onchange={(e) =>
+                                                        {#if item.calculation_type === "per-person"}
+                                                            <span class="text-xs text-on-surface-variant/50 font-mono">{guestCount}pp</span>
+                                                        {:else if item.calculation_type === "per-group"}
+                                                            <div class="flex flex-col gap-0.5">
+                                                                <input
+                                                                    type="number"
+                                                                    value={item.quantity}
+                                                                    min="0"
+                                                                    class="w-full bg-transparent text-sm text-on-surface font-mono border-0 border-b border-transparent hover:border-outline-variant focus:border-primary focus:outline-none px-0 py-0.5 transition tabular-nums"
+                                                                    onblur={(e) =>
+                                                                        handleLineItemBlur(
+                                                                            category.id,
+                                                                            item.id,
+                                                                            "quantity",
+                                                                            Number(e.currentTarget.value),
+                                                                        )}
+                                                                />
+                                                                <div class="flex items-center gap-0.5">
+                                                                    <span class="text-[9px] text-on-surface-variant/40">per</span>
+                                                                    <input
+                                                                        type="number"
+                                                                        value={item.group_size}
+                                                                        min="1"
+                                                                        class="w-8 bg-transparent text-[10px] text-on-surface-variant/50 font-mono border-0 border-b border-transparent hover:border-outline-variant focus:border-primary focus:outline-none px-0 py-0 transition tabular-nums"
+                                                                        onblur={(e) =>
+                                                                            handleLineItemBlur(
+                                                                                category.id,
+                                                                                item.id,
+                                                                                "group_size",
+                                                                                Number(e.currentTarget.value) || 1,
+                                                                            )}
+                                                                    />
+                                                                </div>
+                                                            </div>
+                                                        {:else if item.calculation_type === "percentage"}
+                                                            <span class="text-xs text-on-surface-variant/50 font-mono">%</span>
+                                                        {:else}
+                                                            <input
+                                                                type="number"
+                                                                value={item.quantity}
+                                                                min="0"
+                                                                class="w-full bg-transparent text-sm text-on-surface font-mono border-0 border-b border-transparent hover:border-outline-variant focus:border-primary focus:outline-none px-0 py-0.5 transition tabular-nums"
+                                                                onblur={(e) =>
                                                                     handleLineItemBlur(
                                                                         category.id,
                                                                         item.id,
-                                                                        "calculation_type",
-                                                                        e
-                                                                            .currentTarget
-                                                                            .value,
+                                                                        "quantity",
+                                                                        Number(e.currentTarget.value),
                                                                     )}
-                                                            >
-                                                                <option
-                                                                    value="flat"
-                                                                    >Flat</option
+                                                            />
+                                                        {/if}
+                                                    </td>
+                                                    <td class="py-1.5 px-2">
+                                                        <div class="flex flex-col gap-0.5">
+                                                            <div class="relative">
+                                                                <span
+                                                                    class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-medium bg-surface-highest text-on-surface-variant pointer-events-none"
                                                                 >
-                                                                <option
-                                                                    value="per-person"
-                                                                    >Per Person</option
+                                                                    {#if item.calculation_type === "flat"}FLAT{:else if item.calculation_type === "per-person"}P/P{:else if item.calculation_type === "per-group"}P/G{:else}%{/if}
+                                                                </span>
+                                                                <select
+                                                                    value={item.calculation_type}
+                                                                    class="absolute inset-0 opacity-0 w-full cursor-pointer"
+                                                                    onchange={(e) =>
+                                                                        handleLineItemBlur(
+                                                                            category.id,
+                                                                            item.id,
+                                                                            "calculation_type",
+                                                                            e.currentTarget.value,
+                                                                        )}
                                                                 >
-                                                                <option
-                                                                    value="percentage"
-                                                                    >Percentage</option
+                                                                    <option value="flat">Flat</option>
+                                                                    <option value="per-person">Per Person</option>
+                                                                    <option value="per-group">Per Group</option>
+                                                                    <option value="percentage">Percentage</option>
+                                                                </select>
+                                                            </div>
+                                                            {#if item.calculation_type === "percentage"}
+                                                                <select
+                                                                    value={item.percentage_target ?? "all"}
+                                                                    class="text-[9px] text-on-surface-variant/60 bg-transparent border-0 border-b border-transparent hover:border-outline-variant focus:border-primary focus:outline-none px-0 py-0 cursor-pointer w-full"
+                                                                    onchange={(e) =>
+                                                                        handleLineItemBlur(
+                                                                            category.id,
+                                                                            item.id,
+                                                                            "percentage_target",
+                                                                            e.currentTarget.value === "all" ? null : e.currentTarget.value,
+                                                                        )}
                                                                 >
-                                                            </select>
+                                                                    <option value="all">of All</option>
+                                                                    {#each categories as cat (cat.id)}
+                                                                        <option value={cat.type}>of {cat.name}</option>
+                                                                    {/each}
+                                                                </select>
+                                                            {/if}
                                                         </div>
                                                     </td>
                                                     <td
                                                         class="py-1.5 px-2 text-center"
                                                     >
-                                                        <Tooltip
-                                                            text={item.included
-                                                                ? "Required. This cost is included in the total. Click to mark as optional."
-                                                                : "Optional. This cost is NOT included in the total. Click to mark as required."}
-                                                            side="top"
-                                                        >
-                                                            <button
-                                                                onclick={() =>
-                                                                    handleLineItemBlur(
-                                                                        category.id,
-                                                                        item.id,
-                                                                        "included",
-                                                                        !item.included,
-                                                                    )}
-                                                                class="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-semibold uppercase tracking-wide cursor-pointer transition-colors
-																{item.included
-                                                                    ? 'bg-secondary-container text-on-secondary-container hover:bg-secondary-container/70'
-                                                                    : 'bg-surface-highest text-on-surface-variant/60 hover:bg-surface-high'}"
-                                                            >
-                                                                {item.included
-                                                                    ? "Required"
-                                                                    : "Optional"}
-                                                            </button>
-                                                        </Tooltip>
+                                                        <div class="flex flex-col items-center justify-center gap-0.5">
+                                                            {#if activeScenario}
+                                                                <Tooltip
+                                                                    text={item.applicable !== false
+                                                                        ? "Active in this scenario — included in scenario total. Click to exclude."
+                                                                        : "Excluded from this scenario — not counted. Click to include."}
+                                                                    side="top"
+                                                                >
+                                                                    <button
+                                                                        onclick={() =>
+                                                                            handleScenarioToggleApplicable(
+                                                                                item.id,
+                                                                                item.applicable !== false,
+                                                                            )}
+                                                                        class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-semibold uppercase tracking-wide cursor-pointer transition-colors
+                                                                            {item.applicable !== false
+                                                                                ? 'bg-tertiary-container text-on-tertiary-container hover:bg-tertiary-container/70'
+                                                                                : 'bg-surface-highest text-on-surface-variant/40 hover:bg-surface-high'}"
+                                                                    >
+                                                                        {#if item.applicable !== false}
+                                                                            <Eye size={10} />Active
+                                                                        {:else}
+                                                                            <EyeOff size={10} />Off
+                                                                        {/if}
+                                                                    </button>
+                                                                </Tooltip>
+                                                                <span class="text-[8px] text-on-surface-variant/40 uppercase tracking-widest">
+                                                                    {item.included ? "req" : "opt"}
+                                                                </span>
+                                                            {:else}
+                                                                <Tooltip
+                                                                    text={item.included
+                                                                        ? "Required. This cost is included in the total. Click to mark as optional."
+                                                                        : "Optional. This cost is NOT included in the total. Click to mark as required."}
+                                                                    side="top"
+                                                                >
+                                                                    <button
+                                                                        onclick={() =>
+                                                                            handleLineItemBlur(
+                                                                                category.id,
+                                                                                item.id,
+                                                                                "included",
+                                                                                !item.included,
+                                                                            )}
+                                                                        class="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-semibold uppercase tracking-wide cursor-pointer transition-colors
+                                                                            {item.included
+                                                                                ? 'bg-secondary-container text-on-secondary-container hover:bg-secondary-container/70'
+                                                                                : 'bg-surface-highest text-on-surface-variant/60 hover:bg-surface-high'}"
+                                                                    >
+                                                                        {item.included
+                                                                            ? "Required"
+                                                                            : "Optional"}
+                                                                    </button>
+                                                                </Tooltip>
+                                                            {/if}
+                                                        </div>
                                                     </td>
                                                     <td class="py-1.5 px-2">
                                                         <input
@@ -1424,23 +1725,15 @@
                                                     <td
                                                         class="py-1.5 px-2 text-right font-mono tabular-nums text-on-surface/80"
                                                     >
-                                                        {#if item.included}
-                                                            {formatCurrency(
-                                                                itemTotal,
-                                                            )}
+                                                        {#if item.applicable === false}
+                                                            <span class="text-on-surface-variant/30 text-[10px] italic">n/a</span>
+                                                        {:else if item.included}
+                                                            {formatCurrency(itemTotal)}
                                                         {:else}
-                                                            <span
-                                                                class="text-on-surface-variant/50"
-                                                                >{formatCurrency(
-                                                                    item.calculation_type ===
-                                                                        "per-person"
-                                                                        ? item.cost *
-                                                                              guestCount *
-                                                                              item.quantity
-                                                                        : item.cost *
-                                                                              item.quantity,
-                                                                )}</span
-                                                            >
+                                                            {@const optTotal = item.calculation_type === "per-person"
+                                                                ? item.cost * guestCount
+                                                                : item.cost * item.quantity}
+                                                            <span class="text-on-surface-variant/50">{formatCurrency(optTotal)}</span>
                                                         {/if}
                                                     </td>
                                                     <td class="py-1.5 px-1">
@@ -1467,88 +1760,122 @@
                             <div
                                 class="bg-surface-high border-t-2 border-outline-variant px-4 py-3 space-y-2"
                             >
-                                <div
-                                    class="flex items-center justify-between gap-4 flex-wrap"
-                                >
+                                {#if activeScenario}
+                                    <!-- Scenario total bar -->
+                                    <div class="flex items-center justify-between gap-4 flex-wrap">
+                                        <div class="flex items-center gap-4 text-sm text-on-surface-variant">
+                                            <div class="flex items-center gap-2">
+                                                <Layers size={14} class="text-primary" />
+                                                <span class="font-semibold text-on-surface">{activeScenario.name}</span>
+                                            </div>
+                                            <span class="text-on-surface-variant/60">|</span>
+                                            <span>Active items: <strong class="text-on-surface font-mono tabular-nums">{formatCurrency(subtotal)}</strong></span>
+                                            {#if fees.serviceCharge > 0}<span>Service: <strong class="font-mono tabular-nums">{formatCurrency(fees.serviceCharge)}</strong></span>{/if}
+                                            {#if fees.gratuity > 0}<span>Gratuity: <strong class="font-mono tabular-nums">{formatCurrency(fees.gratuity)}</strong></span>{/if}
+                                            {#if fees.tax > 0}<span>Tax: <strong class="font-mono tabular-nums">{formatCurrency(fees.tax)}</strong></span>{/if}
+                                            {#if fees.otherFees > 0}<span>Other: <strong class="font-mono tabular-nums">{formatCurrency(fees.otherFees)}</strong></span>{/if}
+                                        </div>
+                                        <div class="text-right">
+                                            <div class="text-lg font-bold text-primary font-mono tabular-nums">
+                                                {formatCurrency(grandTotal)}
+                                            </div>
+                                            <div class="text-[10px] text-on-surface-variant font-mono">
+                                                {formatCurrency(grandTotal / (guestCount || 1))}/guest
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {@const baseGrandTotal = calculateGrandTotal(rawCategories, guestCount)}
+                                    {@const diff = grandTotal - baseGrandTotal}
+                                    {#if diff !== 0}
+                                        <div class="text-xs {diff > 0 ? 'text-error' : 'text-tertiary'}">
+                                            {diff > 0 ? '+' : ''}{formatCurrency(diff)} vs base pricing ({formatCurrency(baseGrandTotal)})
+                                        </div>
+                                    {/if}
+                                {:else}
+                                    <!-- Base pricing total bar -->
                                     <div
-                                        class="flex items-center gap-6 text-sm text-on-surface-variant"
+                                        class="flex items-center justify-between gap-4 flex-wrap"
                                     >
-                                        <Tooltip
-                                            text="Total of all items marked as required — these costs are included in the grand total."
-                                            side="bottom"
-                                            ><span
-                                                >Required: <strong
-                                                    class="text-on-surface font-mono tabular-nums"
-                                                    >{formatCurrency(
-                                                        subtotal,
-                                                    )}</strong
-                                                ></span
-                                            ></Tooltip
+                                        <div
+                                            class="flex items-center gap-6 text-sm text-on-surface-variant"
                                         >
-                                        {#if optionalTotal > 0}
                                             <Tooltip
-                                                text="Total of all items marked as optional — these costs are NOT included in the grand total."
+                                                text="Total of all items marked as required — these costs are included in the grand total."
                                                 side="bottom"
                                                 ><span
-                                                    >Optional: <strong
-                                                        class="font-mono tabular-nums text-on-surface-variant"
+                                                    >Required: <strong
+                                                        class="text-on-surface font-mono tabular-nums"
                                                         >{formatCurrency(
-                                                            optionalTotal,
+                                                            subtotal,
                                                         )}</strong
                                                     ></span
                                                 ></Tooltip
                                             >
-                                        {/if}
-                                        {#if fees.serviceCharge > 0}<span
-                                                >Service: <strong
-                                                    class="font-mono tabular-nums"
-                                                    >{formatCurrency(
-                                                        fees.serviceCharge,
-                                                    )}</strong
-                                                ></span
-                                            >{/if}
-                                        {#if fees.gratuity > 0}<span
-                                                >Gratuity: <strong
-                                                    class="font-mono tabular-nums"
-                                                    >{formatCurrency(
-                                                        fees.gratuity,
-                                                    )}</strong
-                                                ></span
-                                            >{/if}
-                                        {#if fees.tax > 0}<span
-                                                >Tax: <strong
-                                                    class="font-mono tabular-nums"
-                                                    >{formatCurrency(
-                                                        fees.tax,
-                                                    )}</strong
-                                                ></span
-                                            >{/if}
-                                        {#if fees.otherFees > 0}<span
-                                                >Other: <strong
-                                                    class="font-mono tabular-nums"
-                                                    >{formatCurrency(
-                                                        fees.otherFees,
-                                                    )}</strong
-                                                ></span
-                                            >{/if}
-                                    </div>
-                                    <div
-                                        class="text-lg font-bold text-primary font-mono tabular-nums"
-                                    >
-                                        {formatCurrency(grandTotal)}
-                                    </div>
-                                </div>
-                                {#if optionalTotal > 0}
-                                    <div
-                                        class="text-xs text-on-surface-variant"
-                                    >
-                                        With optional add-ons: <span
-                                            class="font-mono"
-                                            >{formatCurrency(
-                                                grandTotal + optionalTotal,
-                                            )}</span
+                                            {#if optionalTotal > 0}
+                                                <Tooltip
+                                                    text="Total of all items marked as optional — these costs are NOT included in the grand total."
+                                                    side="bottom"
+                                                    ><span
+                                                        >Optional: <strong
+                                                            class="font-mono tabular-nums text-on-surface-variant"
+                                                            >{formatCurrency(
+                                                                optionalTotal,
+                                                            )}</strong
+                                                        ></span
+                                                    ></Tooltip
+                                                >
+                                            {/if}
+                                            {#if fees.serviceCharge > 0}<span
+                                                    >Service: <strong
+                                                        class="font-mono tabular-nums"
+                                                        >{formatCurrency(
+                                                            fees.serviceCharge,
+                                                        )}</strong
+                                                    ></span
+                                                >{/if}
+                                            {#if fees.gratuity > 0}<span
+                                                    >Gratuity: <strong
+                                                        class="font-mono tabular-nums"
+                                                        >{formatCurrency(
+                                                            fees.gratuity,
+                                                        )}</strong
+                                                    ></span
+                                                >{/if}
+                                            {#if fees.tax > 0}<span
+                                                    >Tax: <strong
+                                                        class="font-mono tabular-nums"
+                                                        >{formatCurrency(
+                                                            fees.tax,
+                                                        )}</strong
+                                                    ></span
+                                                >{/if}
+                                            {#if fees.otherFees > 0}<span
+                                                    >Other: <strong
+                                                        class="font-mono tabular-nums"
+                                                        >{formatCurrency(
+                                                            fees.otherFees,
+                                                        )}</strong
+                                                    ></span
+                                                >{/if}
+                                        </div>
+                                        <div
+                                            class="text-lg font-bold text-primary font-mono tabular-nums"
                                         >
+                                            {formatCurrency(grandTotal)}
+                                        </div>
                                     </div>
+                                    {#if optionalTotal > 0}
+                                        <div
+                                            class="text-xs text-on-surface-variant"
+                                        >
+                                            With optional add-ons: <span
+                                                class="font-mono"
+                                                >{formatCurrency(
+                                                    grandTotal + optionalTotal,
+                                                )}</span
+                                            >
+                                        </div>
+                                    {/if}
                                 {/if}
                             </div>
                         </div>
@@ -2205,67 +2532,6 @@
                             />
                         </div>
 
-                        <!-- External Links -->
-                        <div
-                            class="bg-surface-lowest rounded-xl p-6 border border-outline-variant"
-                        >
-                            <div class="flex items-center justify-between mb-4">
-                                <span
-                                    class="font-mono text-[10px] uppercase tracking-widest text-secondary"
-                                    >External Links</span
-                                >
-                                <button
-                                    onclick={addLink}
-                                    class="flex items-center gap-1 px-2 py-1 rounded-lg text-xs text-primary hover:bg-surface-low transition cursor-pointer"
-                                >
-                                    <Plus size={12} />
-                                    Add Link
-                                </button>
-                            </div>
-                            {#if externalLinks.length > 0}
-                                <div class="space-y-2">
-                                    {#each externalLinks as link, i}
-                                        <div class="flex items-center gap-2">
-                                            <ExternalLink
-                                                size={14}
-                                                class="text-on-surface-variant/40 flex-shrink-0"
-                                            />
-                                            <input
-                                                type="url"
-                                                value={link}
-                                                placeholder="https://..."
-                                                class="flex-1 bg-transparent text-sm text-on-surface border-0 border-b border-transparent hover:border-outline-variant focus:border-primary focus:outline-none px-0 py-1 transition"
-                                                onblur={(e) =>
-                                                    updateLink(
-                                                        i,
-                                                        e.currentTarget.value,
-                                                    )}
-                                            />
-                                            {#if link}
-                                                <a
-                                                    href={link}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    class="p-1 rounded-lg hover:bg-surface-high text-on-surface-variant/40 hover:text-primary transition"
-                                                >
-                                                    <ExternalLink size={14} />
-                                                </a>
-                                            {/if}
-                                            <button
-                                                onclick={() => removeLink(i)}
-                                                class="p-1 rounded-lg hover:bg-error-container text-on-surface-variant/30 hover:text-error transition cursor-pointer"
-                                            >
-                                                <X size={12} />
-                                            </button>
-                                        </div>
-                                    {/each}
-                                </div>
-                            {:else}<p
-                                    class="text-sm text-on-surface-variant italic"
-                                >
-                                    No external links added yet.
-                                </p>{/if}
-                        </div>
                     </div>
                 {/if}
             </div>

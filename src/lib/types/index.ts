@@ -16,7 +16,7 @@ export type CostCategoryType =
 	| 'miscellaneous';
 
 export type VenueType = 'all-inclusive' | 'semi-inclusive' | 'open-vendor';
-export type CalculationType = 'flat' | 'per-person' | 'percentage';
+export type CalculationType = 'flat' | 'per-person' | 'per-group' | 'percentage';
 export type PricingTier = 'saturday' | 'friday-sunday' | 'weekday';
 export type DateStatus = 'available' | 'held' | 'booked';
 
@@ -55,6 +55,7 @@ export interface Venue {
 	created_at: string;
 	updated_at: string;
 	cost_categories?: CostCategory[];
+	cost_scenarios?: CostScenario[];
 	venue_dates?: VenueDate[];
 	contract?: ContractInfo;
 	image_url?: string; // base64 data URL for venue photo
@@ -81,9 +82,31 @@ export interface LineItem {
 	cost: number;
 	quantity: number;
 	calculation_type: CalculationType;
+	group_size: number;
+	percentage_target: string | null;
 	included: boolean;
+	applicable: boolean;
 	notes: string;
 	sort_order: number;
+}
+
+export interface CostScenario {
+	id: string;
+	venue_id: string;
+	name: string;
+	description: string;
+	is_locked: boolean;
+	created_at: string;
+	overrides?: ScenarioOverride[];
+}
+
+export interface ScenarioOverride {
+	id: string;
+	scenario_id: string;
+	line_item_id: string;
+	applicable: boolean;
+	cost_override: number | null;
+	notes_override: string | null;
 }
 
 export interface VenueDate {

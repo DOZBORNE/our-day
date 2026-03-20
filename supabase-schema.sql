@@ -23,8 +23,12 @@ CREATE TABLE venues (
   id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
   name TEXT NOT NULL,
   location TEXT DEFAULT '',
+  location_lat DOUBLE PRECISION DEFAULT NULL,
+  location_lng DOUBLE PRECISION DEFAULT NULL,
   description TEXT DEFAULT '',
   contact_info TEXT DEFAULT '',
+  website TEXT DEFAULT '',
+  email TEXT DEFAULT '',
   capacity_seated INTEGER DEFAULT 0,
   capacity_standing INTEGER DEFAULT 0,
   venue_type TEXT NOT NULL DEFAULT 'all-inclusive',
@@ -37,6 +41,8 @@ CREATE TABLE venues (
   cons TEXT[] DEFAULT '{}',
   rating INTEGER DEFAULT 0,
   notes TEXT DEFAULT '',
+  image_url TEXT DEFAULT '',
+  attachments JSONB DEFAULT '[]',
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
@@ -62,9 +68,33 @@ CREATE TABLE line_items (
   cost NUMERIC DEFAULT 0,
   quantity INTEGER DEFAULT 1,
   calculation_type TEXT DEFAULT 'flat',
+  group_size INTEGER DEFAULT 1,
+  percentage_target TEXT DEFAULT NULL,
   included BOOLEAN DEFAULT true,
+  applicable BOOLEAN DEFAULT true,
   notes TEXT DEFAULT '',
   sort_order INTEGER DEFAULT 0
+);
+
+-- Cost Scenarios (belong to a venue)
+CREATE TABLE cost_scenarios (
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  venue_id TEXT NOT NULL REFERENCES venues(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  description TEXT DEFAULT '',
+  is_locked BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Scenario Overrides (belong to a scenario, override a line item)
+CREATE TABLE scenario_overrides (
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  scenario_id TEXT NOT NULL REFERENCES cost_scenarios(id) ON DELETE CASCADE,
+  line_item_id TEXT NOT NULL REFERENCES line_items(id) ON DELETE CASCADE,
+  applicable BOOLEAN DEFAULT true,
+  cost_override NUMERIC DEFAULT NULL,
+  notes_override TEXT DEFAULT NULL,
+  UNIQUE(scenario_id, line_item_id)
 );
 
 -- Venue Dates
@@ -109,6 +139,9 @@ CREATE INDEX idx_cost_categories_venue ON cost_categories(venue_id);
 CREATE INDEX idx_cost_categories_vendor ON cost_categories(vendor_id);
 CREATE INDEX idx_line_items_category ON line_items(category_id);
 CREATE INDEX idx_line_items_vendor ON line_items(vendor_id);
+CREATE INDEX idx_cost_scenarios_venue ON cost_scenarios(venue_id);
+CREATE INDEX idx_scenario_overrides_scenario ON scenario_overrides(scenario_id);
+CREATE INDEX idx_scenario_overrides_line_item ON scenario_overrides(line_item_id);
 CREATE INDEX idx_venue_dates_venue ON venue_dates(venue_id);
 CREATE INDEX idx_venue_dates_date ON venue_dates(date);
 CREATE INDEX idx_contracts_venue ON contracts(venue_id);
@@ -122,6 +155,8 @@ ALTER TABLE cost_categories ENABLE ROW LEVEL SECURITY;
 ALTER TABLE line_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE venue_dates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE contracts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE cost_scenarios ENABLE ROW LEVEL SECURITY;
+ALTER TABLE scenario_overrides ENABLE ROW LEVEL SECURITY;
 ALTER TABLE payment_milestones ENABLE ROW LEVEL SECURITY;
 
 -- Allow all operations (no auth required)
@@ -132,4 +167,6 @@ CREATE POLICY "Allow all" ON cost_categories FOR ALL USING (true) WITH CHECK (tr
 CREATE POLICY "Allow all" ON line_items FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all" ON venue_dates FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all" ON contracts FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all" ON cost_scenarios FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all" ON scenario_overrides FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all" ON payment_milestones FOR ALL USING (true) WITH CHECK (true);

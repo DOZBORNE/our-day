@@ -131,7 +131,10 @@
 				cost: 0,
 				quantity: 1,
 				calculation_type: 'flat',
+				group_size: 1,
+				percentage_target: null,
 				included: true,
+				applicable: true,
 				notes: '',
 				sort_order: formLineItems.length
 			}
@@ -385,8 +388,6 @@
 					<span class="text-sm font-bold text-primary font-mono">{formatCurrency(totalCost)}</span>
 				</div>
 			</div>
-		{:else if totalCost > 0}
-			<p class="text-sm font-bold text-primary mt-2">{formatCurrency(totalCost)}</p>
 		{/if}
 
 		<!-- Linked venues -->
