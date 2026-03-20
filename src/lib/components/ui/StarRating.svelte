@@ -29,7 +29,7 @@
 			class="focus:outline-none {readonly ? 'cursor-default' : 'cursor-pointer hover:scale-110'} transition-transform"
 			disabled={readonly}
 		>
-			<svg viewBox="0 0 24 24" class="{sizeClasses[size]} {star <= value ? 'text-gold fill-gold' : 'text-charcoal/20 fill-charcoal/20'}">
+			<svg viewBox="0 0 24 24" class="{sizeClasses[size]} {star <= value ? 'text-tertiary-container fill-tertiary-container' : 'text-outline-variant fill-outline-variant'}">
 				<path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z" />
 			</svg>
 		</button>

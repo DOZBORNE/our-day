@@ -45,9 +45,12 @@ export async function loadVenues() {
 				...v,
 				pros: (v.pros as string[]) || [],
 				cons: (v.cons as string[]) || [],
-				cost_categories: ((v.cost_categories as CostCategory[]) || []).sort(
-					(a: CostCategory, b: CostCategory) => a.sort_order - b.sort_order
-				),
+				cost_categories: ((v.cost_categories as CostCategory[]) || [])
+					.sort((a: CostCategory, b: CostCategory) => a.sort_order - b.sort_order)
+					.map((cat: CostCategory) => ({
+						...cat,
+						line_items: (cat.line_items || []).sort((a: LineItem, b: LineItem) => a.sort_order - b.sort_order)
+					})),
 				venue_dates: (v.venue_dates as VenueDate[]) || [],
 				contract: Array.isArray(v.contracts)
 					? (v.contracts as ContractInfo[])[0] || null
@@ -57,6 +60,7 @@ export async function loadVenues() {
 	} catch {
 		console.warn('Supabase not configured, using local venues');
 	}
+
 	loaded = true;
 }
 
@@ -90,43 +94,52 @@ export async function createVenue(venueData: Partial<Venue> = {}): Promise<Venue
 		...venueData
 	};
 
-	try {
-		const {
-			cost_categories,
-			venue_dates,
-			contract,
-			...dbVenue
-		} = venue;
+	// Optimistic UI — user sees venue instantly
+	venues = [venue, ...venues];
 
-		const { data, error } = await supabase.from('venues').insert(dbVenue).select().single();
-		if (error) console.error('Error creating venue:', error);
-		else if (data) venue.id = data.id;
+	// Fire-and-forget DB persistence — don't block the caller
+	(async () => {
+		try {
+			const {
+				cost_categories,
+				venue_dates,
+				contract,
+				...dbVenue
+			} = venue;
 
-		// Insert categories and their line items
-		if (cost_categories) {
-			for (const cat of cost_categories) {
-				cat.venue_id = venue.id;
-				const { line_items, ...catData } = cat;
-				await supabase.from('cost_categories').insert(catData);
-				if (line_items && line_items.length > 0) {
-					await supabase.from('line_items').insert(
-						line_items.map((li) => ({ ...li, category_id: cat.id }))
-					);
+			const { data, error } = await supabase.from('venues').insert(dbVenue).select().single();
+			if (error) console.error('Error creating venue:', error);
+			else if (data) venue.id = data.id;
+
+			// Batch insert all categories at once
+			if (cost_categories && cost_categories.length > 0) {
+				const allCatData = cost_categories.map((cat) => {
+					cat.venue_id = venue.id;
+					const { line_items, ...catData } = cat;
+					return catData;
+				});
+				await supabase.from('cost_categories').insert(allCatData);
+
+				// Batch insert all line items at once
+				const allLineItems = cost_categories.flatMap((cat) =>
+					(cat.line_items ?? []).map((li) => ({ ...li, category_id: cat.id }))
+				);
+				if (allLineItems.length > 0) {
+					await supabase.from('line_items').insert(allLineItems);
 				}
 			}
-		}
 
-		// Insert contract
-		if (contract) {
-			contract.venue_id = venue.id;
-			const { payment_milestones, ...contractData } = contract;
-			await supabase.from('contracts').insert(contractData);
+			// Insert contract
+			if (contract) {
+				contract.venue_id = venue.id;
+				const { payment_milestones, ...contractData } = contract;
+				await supabase.from('contracts').insert(contractData);
+			}
+		} catch {
+			// Local-only mode
 		}
-	} catch {
-		// Local-only mode
-	}
+	})();
 
-	venues = [venue, ...venues];
 	return venue;
 }
 
@@ -236,6 +249,37 @@ export async function removeLineItem(venueId: string, categoryId: string, itemId
 
 	try {
 		await supabase.from('line_items').delete().eq('id', itemId);
+	} catch {
+		// Local-only
+	}
+}
+
+export async function reorderLineItems(venueId: string, categoryId: string, newItems: LineItem[]) {
+	const venue = venues.find((v) => v.id === venueId);
+	if (!venue?.cost_categories) return;
+
+	const cat = venue.cost_categories.find((c) => c.id === categoryId);
+	if (!cat) return;
+
+	// Update sort_order and set in store
+	newItems.forEach((li, i) => { li.sort_order = i; });
+	cat.line_items = newItems;
+
+	try {
+		// Single upsert call for all items with updated sort_order
+		const rows = newItems.map((li) => ({
+			id: li.id,
+			category_id: li.category_id,
+			vendor_id: li.vendor_id,
+			name: li.name,
+			cost: li.cost,
+			quantity: li.quantity,
+			calculation_type: li.calculation_type,
+			included: li.included,
+			notes: li.notes,
+			sort_order: li.sort_order
+		}));
+		await supabase.from('line_items').upsert(rows);
 	} catch {
 		// Local-only
 	}

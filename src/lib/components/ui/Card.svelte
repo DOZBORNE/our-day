@@ -13,8 +13,8 @@
 
 <div
 	class={cn(
-		'rounded-xl bg-cream border border-rose-light/30 shadow-sm',
-		hover && 'hover:shadow-md hover:border-rose/30 transition-shadow cursor-pointer',
+		'rounded-xl bg-surface-lowest border border-outline-variant/10 shadow-sm',
+		hover && 'hover:shadow-md hover:border-outline-variant/20 transition-all cursor-pointer',
 		className
 	)}
 	{...rest}

@@ -28,15 +28,15 @@
 		onkeydown={handleKeydown}
 	>
 		<div
-			class="bg-warm-white rounded-xl shadow-xl w-full max-w-lg mx-4 max-h-[85vh] flex flex-col"
+			class="bg-surface-lowest rounded-xl shadow-xl w-full max-w-lg mx-4 max-h-[85vh] flex flex-col"
 			role="dialog"
 			aria-modal="true"
 			aria-label={title}
 		>
 			{#if title}
-				<div class="flex items-center justify-between px-6 py-4 border-b border-rose-light/30">
-					<h2 class="text-lg font-semibold text-charcoal">{title}</h2>
-					<button onclick={onclose} class="p-1 rounded-lg hover:bg-cream text-charcoal/60 cursor-pointer">
+				<div class="flex items-center justify-between px-6 py-4 border-b border-outline-variant/20">
+					<h2 class="text-lg font-semibold text-on-surface">{title}</h2>
+					<button onclick={onclose} class="p-1 rounded-lg hover:bg-surface-low text-on-surface-variant cursor-pointer">
 						<svg viewBox="0 0 24 24" class="w-5 h-5 fill-current">
 							<path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
 						</svg>
@@ -47,7 +47,7 @@
 				{@render children()}
 			</div>
 			{#if footer}
-				<div class="px-6 py-4 border-t border-rose-light/30 flex justify-end gap-3">
+				<div class="px-6 py-4 border-t border-outline-variant/20 flex justify-end gap-3">
 					{@render footer()}
 				</div>
 			{/if}

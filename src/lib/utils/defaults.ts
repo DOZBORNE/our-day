@@ -206,6 +206,8 @@ export function createDefaultVenue(): Venue {
 		notes: '',
 		created_at: new Date().toISOString(),
 		updated_at: new Date().toISOString(),
+		image_url: '',
+		attachments: [],
 		cost_categories: createDefaultCategories(id),
 		venue_dates: [],
 		contract: createDefaultContract(id)

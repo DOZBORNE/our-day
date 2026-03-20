@@ -53,6 +53,8 @@ export interface Venue {
 	cost_categories?: CostCategory[];
 	venue_dates?: VenueDate[];
 	contract?: ContractInfo;
+	image_url?: string; // base64 data URL for venue photo
+	attachments?: { id: string; name: string; data: string; type: string }[]; // PDF attachments as base64
 }
 
 export interface CostCategory {

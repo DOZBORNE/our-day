@@ -12,11 +12,11 @@
 	let { variant = 'primary', size = 'md', class: className, children, ...rest }: Props = $props();
 
 	const variants = {
-		primary: 'bg-rose text-white hover:bg-rose/90 shadow-sm',
-		secondary: 'bg-sage text-white hover:bg-sage/90 shadow-sm',
-		outline: 'border-2 border-rose text-rose hover:bg-rose-light',
-		ghost: 'text-charcoal hover:bg-cream',
-		danger: 'bg-red-500 text-white hover:bg-red-600'
+		primary: 'bg-gradient-to-r from-primary to-primary-container text-on-primary shadow-sm hover:shadow-md active:scale-[0.98]',
+		secondary: 'bg-secondary text-on-secondary hover:bg-secondary/90 shadow-sm',
+		outline: 'border border-outline-variant text-on-surface hover:bg-surface-low',
+		ghost: 'text-on-surface-variant hover:bg-surface-low hover:text-on-surface',
+		danger: 'bg-error text-on-error hover:bg-error/90'
 	};
 
 	const sizes = {

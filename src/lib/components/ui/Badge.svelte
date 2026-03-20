@@ -11,13 +11,13 @@
 	let { variant = 'rose', class: className, children }: Props = $props();
 
 	const variants = {
-		rose: 'bg-rose-light text-rose border-rose/20',
-		sage: 'bg-sage-light text-sage border-sage/20',
-		gold: 'bg-gold-light text-gold border-gold/20',
-		neutral: 'bg-cream text-charcoal border-charcoal/10',
-		saturday: 'bg-tier-saturday/30 text-charcoal border-tier-saturday/30',
-		frisun: 'bg-tier-frisun/30 text-charcoal border-tier-frisun/30',
-		weekday: 'bg-tier-weekday/30 text-charcoal border-tier-weekday/30'
+		rose: 'bg-primary-fixed text-primary border-primary/20',
+		sage: 'bg-secondary-container text-on-secondary-container border-secondary/20',
+		gold: 'bg-tertiary-fixed text-tertiary border-tertiary/20',
+		neutral: 'bg-surface text-on-surface-variant border-outline-variant/20',
+		saturday: 'bg-tier-saturday/30 text-on-surface border-tier-saturday/30',
+		frisun: 'bg-tier-frisun/30 text-on-surface border-tier-frisun/30',
+		weekday: 'bg-tier-weekday/30 text-on-surface border-tier-weekday/30'
 	};
 </script>
 

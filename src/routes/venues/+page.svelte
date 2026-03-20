@@ -4,13 +4,12 @@
 	import { calculateGrandTotal, calculateVenueSubtotal } from '$lib/utils/calculations';
 	import { formatCurrency, formatDateShort } from '$lib/utils/formatters';
 	import type { Venue, VenueType } from '$lib/types';
-	import Card from '$lib/components/ui/Card.svelte';
-	import Button from '$lib/components/ui/Button.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
 	import StarRating from '$lib/components/ui/StarRating.svelte';
 	import Modal from '$lib/components/ui/Modal.svelte';
-	import Select from '$lib/components/ui/Select.svelte';
+	import Button from '$lib/components/ui/Button.svelte';
 	import { goto } from '$app/navigation';
+	import { Plus, MapPin, Heart, Users, DollarSign, LayoutGrid, List, Trash2, Eye } from 'lucide-svelte';
+	import VenuePlaceholder from '$lib/components/ui/VenuePlaceholder.svelte';
 
 	type SortField = 'name' | 'price' | 'capacity' | 'rating';
 	type SortDir = 'asc' | 'desc';
@@ -18,6 +17,7 @@
 	let sortField = $state<SortField>('name');
 	let sortDir = $state<SortDir>('asc');
 	let filterType = $state<VenueType | 'all'>('all');
+	let viewMode = $state<'grid' | 'list'>('grid');
 
 	let deleteTarget = $state<Venue | null>(null);
 	let showDeleteModal = $state(false);
@@ -72,6 +72,9 @@
 	}
 
 	async function handleAddVenue() {
+		// createVenue adds to store array immediately (optimistic UI), then does DB calls
+		// We await only to get the ID, but navigation happens near-instantly since
+		// the store update is synchronous and DB calls happen in background try/catch
 		const newVenue = await createVenue({ name: 'New Venue' });
 		goto(`/venues/${newVenue.id}`);
 	}
@@ -91,19 +94,6 @@
 		}
 	}
 
-	function venueTypeBadgeVariant(type: VenueType): 'rose' | 'sage' | 'gold' | 'neutral' {
-		switch (type) {
-			case 'all-inclusive':
-				return 'sage';
-			case 'semi-inclusive':
-				return 'gold';
-			case 'open-vendor':
-				return 'rose';
-			default:
-				return 'neutral';
-		}
-	}
-
 	function venueTypeLabel(type: VenueType): string {
 		switch (type) {
 			case 'all-inclusive':
@@ -117,86 +107,153 @@
 		}
 	}
 
+	function typeBadgeClasses(type: VenueType): string {
+		switch (type) {
+			case 'all-inclusive':
+				return 'bg-primary-fixed text-on-primary-container';
+			case 'semi-inclusive':
+				return 'bg-secondary-container text-on-secondary-container';
+			case 'open-vendor':
+				return 'bg-surface-highest text-on-surface';
+			default:
+				return 'bg-surface-highest text-on-surface';
+		}
+	}
+
 	function sortIcon(field: SortField): string {
 		if (sortField !== field) return '';
 		return sortDir === 'asc' ? ' \u2191' : ' \u2193';
 	}
 </script>
 
-<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-	<!-- Header -->
-	<div class="flex items-center justify-between mb-8">
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+	<!-- Header Section -->
+	<div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-6 mb-10">
 		<div>
-			<h1 class="text-3xl font-bold text-charcoal">Venues</h1>
-			<p class="mt-1 text-sm text-charcoal/60">
-				Compare and manage your wedding venue options
+			<span class="font-mono text-[10px] uppercase tracking-widest text-secondary font-medium">
+				Curation & Selection
+			</span>
+			<h1 class="text-4xl font-bold tracking-tight text-on-surface mt-1">Dream Venues</h1>
+			<p class="mt-2 text-on-surface-variant text-sm max-w-md">
+				Compare and manage your wedding venue options. Track pricing, dates, and details all in one place.
 			</p>
 		</div>
-		<Button onclick={handleAddVenue}>
-			<svg viewBox="0 0 24 24" class="w-4 h-4 fill-current">
-				<path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" />
-			</svg>
+		<button
+			onclick={handleAddVenue}
+			class="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-primary to-primary-container text-on-primary rounded-xl text-sm font-semibold shadow-sm hover:shadow-md transition-shadow cursor-pointer whitespace-nowrap"
+		>
+			<Plus class="w-4 h-4" />
 			Add Venue
-		</Button>
+		</button>
 	</div>
 
-	<!-- Sort & Filter Controls -->
+	<!-- Filter Bar -->
 	{#if venues.length > 0}
-		<div class="flex flex-wrap items-end gap-4 mb-6">
-			<div class="flex items-center gap-2">
-				<span class="text-sm font-medium text-charcoal/70">Sort by:</span>
-				{#each (['name', 'price', 'capacity', 'rating'] as const) as field}
+		<div class="bg-surface-low rounded-xl p-4 mb-8 flex flex-wrap items-center justify-between gap-4">
+			<div class="flex items-center gap-2 flex-wrap">
+				<!-- Type filter chips -->
+				{#each (['all', 'all-inclusive', 'semi-inclusive', 'open-vendor'] as const) as type}
 					<button
-						class="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors cursor-pointer
+						class="px-4 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer border
+							{filterType === type
+								? 'bg-primary text-on-primary border-primary'
+								: 'bg-surface-lowest text-on-surface-variant border-outline-variant hover:bg-surface-high'}"
+						onclick={() => (filterType = type)}
+					>
+						{type === 'all' ? 'All Types' : venueTypeLabel(type)}
+					</button>
+				{/each}
+
+				<!-- Sort chips -->
+				<div class="w-px h-5 bg-outline-variant mx-1 hidden sm:block"></div>
+				{#each (['capacity', 'price'] as const) as field}
+					<button
+						class="px-4 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer border
 							{sortField === field
-								? 'bg-rose text-white'
-								: 'bg-cream text-charcoal hover:bg-rose-light'}"
+								? 'bg-tertiary text-on-tertiary border-tertiary'
+								: 'bg-surface-lowest text-on-surface-variant border-outline-variant hover:bg-surface-high'}"
 						onclick={() => toggleSort(field)}
 					>
-						{field.charAt(0).toUpperCase() + field.slice(1)}{sortIcon(field)}
+						{field === 'capacity' ? 'Capacity' : 'Budget Range'}{sortIcon(field)}
 					</button>
 				{/each}
 			</div>
-			<div class="w-48">
-				<Select
-					label="Venue Type"
-					value={filterType}
-					onchange={(e) => {
-						filterType = (e.currentTarget as HTMLSelectElement).value as VenueType | 'all';
-					}}
-				>
-					<option value="all">All Types</option>
-					<option value="all-inclusive">All-Inclusive</option>
-					<option value="semi-inclusive">Semi-Inclusive</option>
-					<option value="open-vendor">Open Vendor</option>
-				</Select>
+
+			<div class="flex items-center gap-3">
+				<!-- Grid/List toggle -->
+				<div class="flex items-center bg-surface rounded-lg p-0.5">
+					<button
+						class="p-1.5 rounded-md transition-colors cursor-pointer {viewMode === 'grid' ? 'bg-surface-lowest shadow-sm text-on-surface' : 'text-outline hover:text-on-surface-variant'}"
+						onclick={() => (viewMode = 'grid')}
+						title="Grid view"
+					>
+						<LayoutGrid class="w-4 h-4" />
+					</button>
+					<button
+						class="p-1.5 rounded-md transition-colors cursor-pointer {viewMode === 'list' ? 'bg-surface-lowest shadow-sm text-on-surface' : 'text-outline hover:text-on-surface-variant'}"
+						onclick={() => (viewMode = 'list')}
+						title="List view"
+					>
+						<List class="w-4 h-4" />
+					</button>
+				</div>
+
+				<!-- Venue count -->
+				<span class="font-mono text-[11px] text-outline">
+					{filteredVenues.length} venue{filteredVenues.length !== 1 ? 's' : ''}
+				</span>
 			</div>
 		</div>
 	{/if}
 
 	<!-- Venue Cards Grid -->
 	{#if filteredVenues.length > 0}
-		<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+		<div class="{viewMode === 'grid' ? 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6' : 'flex flex-col gap-4'}">
 			{#each filteredVenues as venue (venue.id)}
-				<a href="/venues/{venue.id}" class="block no-underline">
-					<Card hover class="h-full flex flex-col">
+				<a href="/venues/{venue.id}" class="group block no-underline">
+					<div class="bg-surface-lowest rounded-2xl overflow-hidden border border-outline-variant/20 shadow-sm hover:shadow-md transition-shadow h-full {viewMode === 'list' ? 'flex flex-row' : 'flex flex-col'}">
+						<!-- Venue image or placeholder -->
+						<div class="relative {viewMode === 'list' ? 'w-48 shrink-0' : 'aspect-[4/3]'} overflow-hidden">
+							{#if venue.image_url}
+								<img src={venue.image_url} alt={venue.name} class="w-full h-full object-cover" />
+							{:else}
+								<VenuePlaceholder />
+							{/if}
+							<!-- Type badge top-left -->
+							<span class="absolute top-3 left-3 {typeBadgeClasses(venue.venue_type)} rounded-full px-3 py-1 font-mono text-[10px] uppercase tracking-wider font-medium">
+								{venueTypeLabel(venue.venue_type)}
+							</span>
+
+							<!-- Heart icon top-right -->
+							<button
+								class="absolute top-3 right-3 p-2 rounded-full bg-black/10 backdrop-blur-sm text-white/80 hover:text-white hover:bg-black/20 transition-colors cursor-pointer"
+								onclick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+								title="Favorite"
+							>
+								<Heart class="w-4 h-4" />
+							</button>
+
+							<!-- Delete button bottom-right -->
+							<button
+								class="absolute bottom-3 right-3 p-2 rounded-full bg-black/10 backdrop-blur-sm text-white/80 hover:text-red-300 hover:bg-black/20 transition-colors cursor-pointer opacity-0 group-hover:opacity-100"
+								onclick={(e) => confirmDelete(venue, e)}
+								title="Delete venue"
+							>
+								<Trash2 class="w-4 h-4" />
+							</button>
+						</div>
+
+						<!-- Card content -->
 						<div class="p-5 flex flex-col gap-3 flex-1">
-							<!-- Top row: name + badge -->
-							<div class="flex items-start justify-between gap-2">
-								<h2 class="text-lg font-semibold text-charcoal leading-tight truncate">
-									{venue.name}
-								</h2>
-								<Badge variant={venueTypeBadgeVariant(venue.venue_type)}>
-									{venueTypeLabel(venue.venue_type)}
-								</Badge>
-							</div>
+							<!-- Name -->
+							<h2 class="text-xl font-bold text-on-surface leading-tight truncate">
+								{venue.name}
+							</h2>
 
 							<!-- Location -->
 							{#if venue.location}
-								<div class="flex items-center gap-1.5 text-sm text-charcoal/60">
-									<svg viewBox="0 0 24 24" class="w-4 h-4 fill-current shrink-0">
-										<path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" />
-									</svg>
+								<div class="flex items-center gap-1.5 text-sm text-on-surface-variant">
+									<MapPin class="w-3.5 h-3.5 shrink-0" />
 									<span class="truncate">{venue.location}</span>
 								</div>
 							{/if}
@@ -206,114 +263,111 @@
 								<StarRating value={venue.rating} readonly size="sm" />
 							{/if}
 
-							<!-- Capacity -->
-							<div class="flex items-center gap-3 text-sm text-charcoal/70">
-								<svg viewBox="0 0 24 24" class="w-4 h-4 fill-current shrink-0">
-									<path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z" />
-								</svg>
-								<span>
-									{#if venue.capacity_seated > 0}
-										{venue.capacity_seated} seated
-									{/if}
-									{#if venue.capacity_seated > 0 && venue.capacity_standing > 0}
-										&middot;
-									{/if}
-									{#if venue.capacity_standing > 0}
-										{venue.capacity_standing} standing
-									{/if}
-									{#if venue.capacity_seated === 0 && venue.capacity_standing === 0}
-										No capacity set
-									{/if}
-								</span>
-							</div>
+							<!-- Divider -->
+							<div class="border-t border-outline-variant/30"></div>
 
-							<!-- Pricing -->
-							<div class="mt-1 p-3 rounded-lg bg-warm-white border border-rose-light/20">
-								<div class="flex justify-between items-baseline text-sm">
-									<span class="text-charcoal/60">Base</span>
-									<span class="font-medium text-charcoal">
-										{formatCurrency(venueBaseTotal(venue))}
-									</span>
+							<!-- Capacity & Cost grid -->
+							<div class="grid grid-cols-2 gap-4">
+								<div>
+									<div class="flex items-center gap-1.5 text-xs text-outline mb-1">
+										<Users class="w-3 h-3" />
+										<span>Capacity</span>
+									</div>
+									<p class="font-mono text-sm font-semibold text-on-surface">
+										{#if venue.capacity_seated > 0}
+											{venue.capacity_seated}
+										{:else}
+											--
+										{/if}
+									</p>
 								</div>
-								<div class="flex justify-between items-baseline text-sm mt-1">
-									<span class="text-charcoal/60">Grand Total</span>
-									<span class="font-semibold text-rose text-base">
+								<div>
+									<div class="flex items-center gap-1.5 text-xs text-outline mb-1">
+										<DollarSign class="w-3 h-3" />
+										<span>Estimated Cost</span>
+									</div>
+									<p class="font-mono text-sm font-semibold text-on-surface">
 										{formatCurrency(venueGrandTotal(venue))}
-									</span>
+									</p>
 								</div>
 							</div>
 
-							<!-- Top 3 Dates -->
+							<!-- Dates preview -->
 							{#if venue.venue_dates && venue.venue_dates.length > 0}
-								<div class="flex flex-wrap gap-1.5 mt-1">
+								<div class="flex flex-wrap gap-1.5">
 									{#each venue.venue_dates.slice(0, 3) as vd}
-										<span
-											class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-cream text-charcoal/70 border border-rose-light/20"
-										>
+										<span class="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-mono font-medium bg-surface-low text-on-surface-variant border border-outline-variant/20">
 											{formatDateShort(vd.date)}
 											{#if vd.status === 'held'}
-												<span class="ml-1 w-1.5 h-1.5 rounded-full bg-gold inline-block"></span>
+												<span class="ml-1 w-1.5 h-1.5 rounded-full bg-tertiary-container inline-block"></span>
 											{:else if vd.status === 'booked'}
-												<span class="ml-1 w-1.5 h-1.5 rounded-full bg-sage inline-block"></span>
+												<span class="ml-1 w-1.5 h-1.5 rounded-full bg-secondary inline-block"></span>
 											{/if}
 										</span>
 									{/each}
 									{#if venue.venue_dates.length > 3}
-										<span class="text-xs text-charcoal/40 self-center">
+										<span class="text-[10px] font-mono text-outline self-center">
 											+{venue.venue_dates.length - 3} more
 										</span>
 									{/if}
 								</div>
 							{/if}
-						</div>
 
-						<!-- Card footer with delete -->
-						<div class="px-5 py-3 border-t border-rose-light/20 flex justify-end">
+							<!-- Spacer -->
+							<div class="flex-1"></div>
+
+							<!-- View Availability button -->
 							<button
-								class="p-1.5 rounded-lg text-charcoal/30 hover:text-red-500 hover:bg-red-50 transition-colors cursor-pointer"
-								title="Delete venue"
-								onclick={(e) => confirmDelete(venue, e)}
+								class="w-full mt-1 px-4 py-2 border border-outline-variant text-primary rounded-xl text-sm font-medium hover:bg-primary-fixed/30 transition-colors cursor-pointer flex items-center justify-center gap-2"
+								onclick={(e) => { e.preventDefault(); goto(`/venues/${venue.id}`); }}
 							>
-								<svg viewBox="0 0 24 24" class="w-4 h-4 fill-current">
-									<path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" />
-								</svg>
+								<Eye class="w-4 h-4" />
+								View Availability
 							</button>
 						</div>
-					</Card>
+					</div>
 				</a>
 			{/each}
+
+			<!-- Add Venue placeholder card -->
+			<button
+				onclick={handleAddVenue}
+				class="group rounded-2xl border-2 border-dashed border-outline-variant/30 hover:border-outline-variant/60 transition-colors cursor-pointer flex {viewMode === 'list' ? 'flex-row gap-4 p-6' : 'flex-col'} items-center justify-center {viewMode === 'list' ? 'min-h-[80px]' : 'min-h-[400px]'} bg-transparent"
+			>
+				<div class="w-14 h-14 rounded-full border-2 border-outline-variant/30 group-hover:border-primary/40 flex items-center justify-center transition-colors mb-4">
+					<Plus class="w-6 h-6 text-outline group-hover:text-primary transition-colors" />
+				</div>
+				<span class="text-sm font-medium text-outline group-hover:text-on-surface-variant transition-colors">Add a venue</span>
+			</button>
 		</div>
 	{:else if venues.length > 0}
 		<!-- Filtered results empty -->
 		<div class="text-center py-16">
-			<div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-cream mb-4">
-				<svg viewBox="0 0 24 24" class="w-8 h-8 fill-charcoal/30">
-					<path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" />
-				</svg>
+			<div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-surface-low mb-4">
+				<Eye class="w-8 h-8 text-outline" />
 			</div>
-			<h3 class="text-lg font-medium text-charcoal mb-1">No matching venues</h3>
-			<p class="text-sm text-charcoal/60">
+			<h3 class="text-lg font-medium text-on-surface mb-1">No matching venues</h3>
+			<p class="text-sm text-on-surface-variant">
 				Try adjusting your filter to see more results.
 			</p>
 		</div>
 	{:else}
 		<!-- Empty state -->
 		<div class="text-center py-20">
-			<div class="inline-flex items-center justify-center w-20 h-20 rounded-full bg-rose-light/50 mb-6">
-				<svg viewBox="0 0 24 24" class="w-10 h-10 fill-rose/60">
-					<path d="M12 7V3H2v18h20V7H12zM6 19H4v-2h2v2zm0-4H4v-2h2v2zm0-4H4V9h2v2zm0-4H4V5h2v2zm4 12H8v-2h2v2zm0-4H8v-2h2v2zm0-4H8V9h2v2zm0-4H8V5h2v2zm10 12h-8v-2h2v-2h-2v-2h2v-2h-2V9h8v10zm-2-8h-2v2h2v-2zm0 4h-2v2h2v-2z" />
-				</svg>
+			<div class="inline-flex items-center justify-center w-20 h-20 rounded-full bg-primary-fixed/50 mb-6">
+				<MapPin class="w-10 h-10 text-primary/60" />
 			</div>
-			<h3 class="text-xl font-semibold text-charcoal mb-2">No venues yet</h3>
-			<p class="text-charcoal/60 mb-6 max-w-sm mx-auto">
+			<h3 class="text-xl font-semibold text-on-surface mb-2">No venues yet</h3>
+			<p class="text-on-surface-variant mb-6 max-w-sm mx-auto">
 				Start comparing wedding venues by adding your first one. Track pricing, dates, and details all in one place.
 			</p>
-			<Button onclick={handleAddVenue}>
-				<svg viewBox="0 0 24 24" class="w-4 h-4 fill-current">
-					<path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" />
-				</svg>
+			<button
+				onclick={handleAddVenue}
+				class="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-primary to-primary-container text-on-primary rounded-xl text-sm font-semibold shadow-sm hover:shadow-md transition-shadow cursor-pointer"
+			>
+				<Plus class="w-4 h-4" />
 				Add Your First Venue
-			</Button>
+			</button>
 		</div>
 	{/if}
 </div>
@@ -327,8 +381,8 @@
 	}}
 	title="Delete Venue"
 >
-	<p class="text-charcoal/80">
-		Are you sure you want to delete <strong>{deleteTarget?.name}</strong>? This will remove all associated costs, dates, and contract information. This action cannot be undone.
+	<p class="text-on-surface-variant">
+		Are you sure you want to delete <strong class="text-on-surface">{deleteTarget?.name}</strong>? This will remove all associated costs, dates, and contract information. This action cannot be undone.
 	</p>
 
 	{#snippet footer()}

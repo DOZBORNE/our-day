@@ -5,20 +5,21 @@
 	import { genId } from '$lib/utils/defaults';
 	import type { Vendor, LineItem, CostCategoryType } from '$lib/types';
 	import { COST_CATEGORY_LABELS, ALL_CATEGORY_TYPES } from '$lib/types';
-	import Card from '$lib/components/ui/Card.svelte';
-	import Button from '$lib/components/ui/Button.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
+	import { showToast } from '$lib/components/ui/Toast.svelte';
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import Input from '$lib/components/ui/Input.svelte';
 	import Select from '$lib/components/ui/Select.svelte';
 	import Textarea from '$lib/components/ui/Textarea.svelte';
+	import Button from '$lib/components/ui/Button.svelte';
+	import { Plus, Search, Mail, Phone, X, Trash2, Edit, ChevronDown } from 'lucide-svelte';
 
 	// --- State ---
 	let showAddModal = $state(false);
 	let showDeleteModal = $state(false);
 	let expandedVendorId = $state<string | null>(null);
 	let vendorToDelete = $state<Vendor | null>(null);
-	let groupByCategory = $state(true);
+	let searchQuery = $state('');
+	let activeCategory = $state<CostCategoryType | 'all'>('all');
 
 	// Form state for add/edit modal
 	let formName = $state('');
@@ -27,6 +28,7 @@
 	let formNotes = $state('');
 	let formLineItems = $state<LineItem[]>([]);
 	let editingVendorId = $state<string | null>(null);
+	let saving = $state(false);
 
 	// --- Derived ---
 	let vendors = $derived(getVendors());
@@ -57,10 +59,26 @@
 		return map;
 	});
 
+	let filteredVendors = $derived.by(() => {
+		let result = vendors;
+		if (searchQuery.trim()) {
+			const q = searchQuery.toLowerCase();
+			result = result.filter(
+				(v) =>
+					v.name.toLowerCase().includes(q) ||
+					v.contact_info.toLowerCase().includes(q) ||
+					v.notes.toLowerCase().includes(q)
+			);
+		}
+		if (activeCategory !== 'all') {
+			result = result.filter((v) => v.category === activeCategory);
+		}
+		return result;
+	});
+
 	let groupedVendors = $derived.by(() => {
-		if (!groupByCategory) return null;
 		const groups = new Map<CostCategoryType, Vendor[]>();
-		for (const v of vendors) {
+		for (const v of filteredVendors) {
 			const list = groups.get(v.category) ?? [];
 			list.push(v);
 			groups.set(v.category, list);
@@ -68,16 +86,14 @@
 		return groups;
 	});
 
-	// --- Badge variant helper ---
-	function categoryBadgeVariant(category: CostCategoryType): 'sage' | 'gold' | 'rose' | 'neutral' {
-		const sageCats: CostCategoryType[] = ['catering', 'bar', 'cake', 'staffing'];
-		const goldCats: CostCategoryType[] = ['entertainment', 'decor-floral', 'photo-video', 'rental-upgrades', 'rentals-included'];
-		const roseCats: CostCategoryType[] = ['planning', 'fees-taxes', 'venue-rental', 'time'];
-		if (sageCats.includes(category)) return 'sage';
-		if (goldCats.includes(category)) return 'gold';
-		if (roseCats.includes(category)) return 'rose';
-		return 'neutral';
-	}
+	// Unique categories that have vendors (for filter pills)
+	let usedCategories = $derived.by(() => {
+		const cats = new Set<CostCategoryType>();
+		for (const v of vendors) {
+			cats.add(v.category);
+		}
+		return ALL_CATEGORY_TYPES.filter((c) => cats.has(c));
+	});
 
 	// --- Form helpers ---
 	function resetForm() {
@@ -128,26 +144,34 @@
 
 	async function handleSave() {
 		if (!formName.trim()) return;
-
-		if (editingVendorId) {
-			await updateVendor(editingVendorId, {
-				name: formName,
-				category: formCategory,
-				contact_info: formContactInfo,
-				notes: formNotes
-			});
-			await updateVendorLineItems(editingVendorId, formLineItems);
-		} else {
-			await createVendor({
-				name: formName,
-				category: formCategory,
-				contact_info: formContactInfo,
-				notes: formNotes,
-				line_items: formLineItems
-			});
+		saving = true;
+		try {
+			if (editingVendorId) {
+				await updateVendor(editingVendorId, {
+					name: formName,
+					category: formCategory,
+					contact_info: formContactInfo,
+					notes: formNotes
+				});
+				await updateVendorLineItems(editingVendorId, formLineItems);
+				showToast('Vendor updated');
+			} else {
+				await createVendor({
+					name: formName,
+					category: formCategory,
+					contact_info: formContactInfo,
+					notes: formNotes,
+					line_items: formLineItems
+				});
+				showToast('Vendor added');
+			}
+			showAddModal = false;
+			resetForm();
+		} catch {
+			showToast('Failed to save vendor', 'error');
+		} finally {
+			saving = false;
 		}
-		showAddModal = false;
-		resetForm();
 	}
 
 	function confirmDelete(vendor: Vendor) {
@@ -166,60 +190,129 @@
 	function toggleExpand(vendorId: string) {
 		expandedVendorId = expandedVendorId === vendorId ? null : vendorId;
 	}
+
+	function parseContact(info: string): { emails: string[]; phones: string[]; other: string[] } {
+		const parts = info.split(/[,\n]+/).map((s) => s.trim()).filter(Boolean);
+		const emails: string[] = [];
+		const phones: string[] = [];
+		const other: string[] = [];
+		for (const p of parts) {
+			if (p.includes('@')) emails.push(p);
+			else if (/[\d\-().+]{7,}/.test(p)) phones.push(p);
+			else other.push(p);
+		}
+		return { emails, phones, other };
+	}
 </script>
 
 <!-- Header -->
-<div class="max-w-6xl mx-auto px-4 py-8">
-	<div class="flex items-center justify-between mb-8">
+<div class="max-w-5xl mx-auto px-4 py-10">
+	<div class="flex items-end justify-between mb-10">
 		<div>
-			<h1 class="text-3xl font-bold text-charcoal">Vendor Library</h1>
-			<p class="text-charcoal/60 mt-1">{vendors.length} vendor{vendors.length !== 1 ? 's' : ''} saved</p>
+			<h1 class="text-4xl font-bold tracking-tight text-on-surface">Vendors Portfolio</h1>
+			<p class="text-on-surface-variant mt-1.5">{vendors.length} vendor{vendors.length !== 1 ? 's' : ''} in your portfolio</p>
 		</div>
-		<div class="flex items-center gap-3">
-			<label class="flex items-center gap-2 text-sm text-charcoal/70 cursor-pointer">
-				<input type="checkbox" bind:checked={groupByCategory} class="rounded border-rose-light/50 text-rose focus:ring-rose/50" />
-				Group by category
-			</label>
-			<Button onclick={openAddModal}>
-				<svg viewBox="0 0 24 24" class="w-4 h-4 fill-current"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
-				Add Vendor
-			</Button>
-		</div>
+		<button
+			onclick={openAddModal}
+			class="inline-flex items-center gap-2 bg-gradient-to-r from-primary to-primary-container text-on-primary px-5 py-2.5 rounded-xl font-medium text-sm shadow-sm hover:shadow-md transition-shadow cursor-pointer"
+		>
+			<Plus size={16} />
+			Add Vendor
+		</button>
 	</div>
 
-	<!-- Vendor Grid -->
-	{#if vendors.length === 0}
-		<Card class="p-12 text-center">
-			<div class="text-charcoal/40 mb-4">
-				<svg viewBox="0 0 24 24" class="w-16 h-16 mx-auto fill-current"><path d="M12 7V3H2v18h20V7H12zM6 19H4v-2h2v2zm0-4H4v-2h2v2zm0-4H4V9h2v2zm0-4H4V5h2v2zm4 12H8v-2h2v2zm0-4H8v-2h2v2zm0-4H8V9h2v2zm0-4H8V5h2v2zm10 12h-8v-2h2v-2h-2v-2h2v-2h-2V9h8v10zm-2-8h-2v2h2v-2zm0 4h-2v2h2v-2z"/></svg>
+	<!-- Search & Filter Bar -->
+	<div class="mb-8 space-y-4">
+		<div class="relative">
+			<Search size={18} class="absolute left-4 top-1/2 -translate-y-1/2 text-outline" />
+			<input
+				type="text"
+				placeholder="Search vendors..."
+				bind:value={searchQuery}
+				class="w-full bg-surface-highest border-none rounded-xl pl-11 pr-4 py-3 text-sm text-on-surface placeholder:text-outline focus:outline-none focus:ring-2 focus:ring-primary/30"
+			/>
+		</div>
+
+		{#if usedCategories.length > 0}
+			<div class="flex flex-wrap gap-2">
+				<button
+					onclick={() => (activeCategory = 'all')}
+					class="px-3.5 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer {activeCategory === 'all'
+						? 'bg-secondary-container text-on-secondary-container'
+						: 'bg-surface-low text-on-surface-variant hover:bg-surface'}"
+				>
+					All
+				</button>
+				{#each usedCategories as cat}
+					<button
+						onclick={() => (activeCategory = activeCategory === cat ? 'all' : cat)}
+						class="px-3.5 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer {activeCategory === cat
+							? 'bg-secondary-container text-on-secondary-container'
+							: 'bg-surface-low text-on-surface-variant hover:bg-surface'}"
+					>
+						{COST_CATEGORY_LABELS[cat]}
+					</button>
+				{/each}
 			</div>
-			<p class="text-charcoal/60 text-lg mb-4">No vendors yet</p>
-			<Button onclick={openAddModal}>Add Your First Vendor</Button>
-		</Card>
-	{:else if groupByCategory}
-		{@const groups = groupedVendors}
+		{/if}
+	</div>
+
+	<!-- Vendor Content -->
+	{#if vendors.length === 0}
+		<div class="bg-surface-lowest rounded-xl p-16 text-center">
+			<p class="text-outline text-lg mb-4">No vendors yet</p>
+			<button
+				onclick={openAddModal}
+				class="inline-flex items-center gap-2 bg-gradient-to-r from-primary to-primary-container text-on-primary px-5 py-2.5 rounded-xl font-medium text-sm cursor-pointer"
+			>
+				<Plus size={16} />
+				Add Your First Vendor
+			</button>
+		</div>
+	{:else if filteredVendors.length === 0}
+		<div class="bg-surface-lowest rounded-xl p-16 text-center">
+			<p class="text-outline text-lg">No vendors match your search</p>
+		</div>
+	{:else}
 		{#each ALL_CATEGORY_TYPES as categoryType}
-			{@const categoryVendors = groups.get(categoryType)}
+			{@const categoryVendors = groupedVendors.get(categoryType)}
 			{#if categoryVendors && categoryVendors.length > 0}
-				<div class="mb-8">
-					<div class="flex items-center gap-2 mb-4">
-						<Badge variant={categoryBadgeVariant(categoryType)}>{COST_CATEGORY_LABELS[categoryType]}</Badge>
-						<span class="text-sm text-charcoal/50">{categoryVendors.length}</span>
+				<div class="mb-10">
+					<!-- Category heading with divider -->
+					<div class="flex items-center gap-4 mb-5">
+						<h2 class="text-xl font-bold text-on-surface whitespace-nowrap">{COST_CATEGORY_LABELS[categoryType]}</h2>
+						<div class="flex-1 h-px bg-outline-variant"></div>
+						<span class="font-mono text-xs text-outline whitespace-nowrap">{categoryVendors.length} vendor{categoryVendors.length !== 1 ? 's' : ''}</span>
 					</div>
-					<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+
+					<!-- 2-col grid -->
+					<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 						{#each categoryVendors as vendor (vendor.id)}
 							{@render vendorCard(vendor)}
 						{/each}
 					</div>
 				</div>
+			{:else if activeCategory === categoryType || activeCategory === 'all'}
+				{#if activeCategory === categoryType}
+					<div class="mb-10">
+						<div class="flex items-center gap-4 mb-5">
+							<h2 class="text-xl font-bold text-on-surface whitespace-nowrap">{COST_CATEGORY_LABELS[categoryType]}</h2>
+							<div class="flex-1 h-px bg-outline-variant"></div>
+							<span class="font-mono text-xs text-outline">0</span>
+						</div>
+						<div class="bg-surface-lowest rounded-xl p-8 text-center">
+							<p class="text-outline text-sm mb-2">No vendors assigned to this category yet</p>
+							<button
+								onclick={openAddModal}
+								class="text-xs font-mono uppercase tracking-wider text-primary hover:text-primary-container transition-colors cursor-pointer"
+							>
+								+ Add {COST_CATEGORY_LABELS[categoryType]} Vendor
+							</button>
+						</div>
+					</div>
+				{/if}
 			{/if}
 		{/each}
-	{:else}
-		<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-			{#each vendors as vendor (vendor.id)}
-				{@render vendorCard(vendor)}
-			{/each}
-		</div>
 	{/if}
 </div>
 
@@ -227,79 +320,104 @@
 {#snippet vendorCard(vendor: Vendor)}
 	{@const totalCost = vendorTotalCosts.get(vendor.id) ?? 0}
 	{@const venueNames = vendorVenueMap.get(vendor.id) ?? []}
-	<Card hover class="flex flex-col" onclick={() => toggleExpand(vendor.id)}>
-		<div class="p-4">
-			<div class="flex items-start justify-between mb-2">
-				<h3 class="font-semibold text-charcoal text-base">{vendor.name}</h3>
-				<Badge variant={categoryBadgeVariant(vendor.category)}>{COST_CATEGORY_LABELS[vendor.category]}</Badge>
-			</div>
-
-			<p class="text-lg font-bold text-rose mb-1">{formatCurrency(totalCost)}</p>
-
-			{#if vendor.notes}
-				<p class="text-sm text-charcoal/60 line-clamp-2 mb-2">{vendor.notes}</p>
-			{/if}
-
-			{#if venueNames.length > 0}
-				<div class="flex flex-wrap gap-1 mt-2">
-					{#each venueNames as venueName}
-						<span class="text-xs bg-sage-light text-sage px-2 py-0.5 rounded-full">{venueName}</span>
-					{/each}
-				</div>
-			{/if}
+	{@const contact = parseContact(vendor.contact_info)}
+	{@const lineItems = vendor.line_items ?? []}
+	<div
+		class="bg-surface-lowest rounded-xl p-6 border border-transparent hover:border-outline-variant/20 hover:shadow-sm transition-all cursor-pointer"
+		onclick={() => toggleExpand(vendor.id)}
+		role="button"
+		tabindex="0"
+		onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggleExpand(vendor.id); }}
+	>
+		<!-- Name + category badge -->
+		<div class="flex items-start justify-between mb-2">
+			<h3 class="font-semibold text-on-surface text-base">{vendor.name}</h3>
+			<span class="bg-secondary-container font-mono text-[10px] uppercase tracking-wider text-on-secondary-container px-2 py-0.5 rounded-md">
+				{COST_CATEGORY_LABELS[vendor.category]}
+			</span>
 		</div>
 
-		<!-- Expanded Details -->
-		{#if expandedVendorId === vendor.id}
-			<div class="border-t border-rose-light/30 px-4 py-4 space-y-4" onclick={(e) => e.stopPropagation()}>
-				{#if vendor.contact_info}
-					<div>
-						<span class="text-xs font-medium text-charcoal/50 uppercase tracking-wider">Contact</span>
-						<p class="text-sm text-charcoal mt-0.5">{vendor.contact_info}</p>
-					</div>
-				{/if}
+		<!-- Notes/description -->
+		{#if vendor.notes}
+			<p class="text-sm text-on-surface-variant italic line-clamp-2 mb-3">{vendor.notes}</p>
+		{/if}
 
-				{#if (vendor.line_items ?? []).length > 0}
-					<div>
-						<span class="text-xs font-medium text-charcoal/50 uppercase tracking-wider">Line Items</span>
-						<div class="mt-2 space-y-1.5">
-							{#each vendor.line_items ?? [] as item}
-								<div class="flex items-center justify-between text-sm">
-									<div class="flex items-center gap-2">
-										<span class="text-charcoal">{item.name || 'Unnamed item'}</span>
-										{#if !item.included}
-											<span class="text-xs text-charcoal/40 italic">excluded</span>
-										{/if}
-									</div>
-									<div class="flex items-center gap-2 text-charcoal/70">
-										{#if item.quantity > 1}
-											<span class="text-xs">{item.quantity}x</span>
-										{/if}
-										<span>{formatCurrency(item.cost * item.quantity)}</span>
-										{#if item.calculation_type !== 'flat'}
-											<span class="text-xs text-charcoal/40">({item.calculation_type})</span>
-										{/if}
-									</div>
-								</div>
-							{/each}
-						</div>
+		<!-- Contact info -->
+		{#if vendor.contact_info}
+			<div class="space-y-1 mb-3">
+				{#each contact.emails as email}
+					<div class="flex items-center gap-2 text-sm text-tertiary">
+						<Mail size={14} />
+						<span>{email}</span>
 					</div>
-				{/if}
-
-				{#if venueNames.length > 0}
-					<div>
-						<span class="text-xs font-medium text-charcoal/50 uppercase tracking-wider">Used in Venues</span>
-						<p class="text-sm text-charcoal mt-0.5">{venueNames.join(', ')}</p>
+				{/each}
+				{#each contact.phones as phone}
+					<div class="flex items-center gap-2 text-sm text-tertiary">
+						<Phone size={14} />
+						<span>{phone}</span>
 					</div>
-				{/if}
-
-				<div class="flex gap-2 pt-2">
-					<Button size="sm" variant="outline" onclick={() => openEditModal(vendor)}>Edit</Button>
-					<Button size="sm" variant="danger" onclick={() => confirmDelete(vendor)}>Delete</Button>
-				</div>
+				{/each}
+				{#each contact.other as info}
+					<div class="flex items-center gap-2 text-sm text-tertiary">
+						<span class="ml-5">{info}</span>
+					</div>
+				{/each}
 			</div>
 		{/if}
-	</Card>
+
+		<!-- Line items section -->
+		{#if lineItems.length > 0}
+			<div class="bg-surface-low rounded-lg p-4 mt-2">
+				<span class="font-mono text-[10px] uppercase tracking-wider text-outline mb-2 block">Line Items</span>
+				<div class="space-y-1">
+					{#each lineItems as item}
+						<div class="flex items-center justify-between text-sm">
+							<span class="text-on-surface">{item.name || 'Unnamed item'}</span>
+							<span class="font-mono text-on-surface-variant">
+								{#if item.quantity > 1}<span class="text-xs text-outline mr-1">{item.quantity}x</span>{/if}
+								{formatCurrency(item.cost * item.quantity)}
+							</span>
+						</div>
+					{/each}
+				</div>
+				<div class="border-t border-outline-variant/40 mt-2 pt-2 flex justify-between">
+					<span class="text-sm font-bold text-primary">Estimated Total</span>
+					<span class="text-sm font-bold text-primary font-mono">{formatCurrency(totalCost)}</span>
+				</div>
+			</div>
+		{:else if totalCost > 0}
+			<p class="text-sm font-bold text-primary mt-2">{formatCurrency(totalCost)}</p>
+		{/if}
+
+		<!-- Linked venues -->
+		{#if venueNames.length > 0}
+			<div class="flex flex-wrap gap-1 mt-3">
+				{#each venueNames as venueName}
+					<span class="text-xs bg-surface-low text-on-surface-variant px-2 py-0.5 rounded-full">{venueName}</span>
+				{/each}
+			</div>
+		{/if}
+
+		<!-- Expanded actions -->
+		{#if expandedVendorId === vendor.id}
+			<div class="border-t border-outline-variant/30 mt-4 pt-4 flex gap-2" onclick={(e) => e.stopPropagation()}>
+				<button
+					onclick={() => openEditModal(vendor)}
+					class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg bg-surface-low text-on-surface-variant hover:bg-surface transition-colors cursor-pointer"
+				>
+					<Edit size={14} />
+					Edit
+				</button>
+				<button
+					onclick={() => confirmDelete(vendor)}
+					class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg bg-error/10 text-error hover:bg-error/20 transition-colors cursor-pointer"
+				>
+					<Trash2 size={14} />
+					Delete
+				</button>
+			</div>
+		{/if}
+	</div>
 {/snippet}
 
 <!-- Add/Edit Vendor Modal -->
@@ -319,39 +437,52 @@
 
 		<!-- Line Items -->
 		<div>
-			<div class="flex items-center justify-between mb-2">
-				<span class="block text-sm font-medium text-charcoal">Line Items</span>
-				<Button size="sm" variant="ghost" onclick={addLineItem}>
-					<svg viewBox="0 0 24 24" class="w-3.5 h-3.5 fill-current"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+			<div class="flex items-center justify-between mb-3">
+				<div>
+					<span class="block text-sm font-medium text-on-surface">Line Items</span>
+					<span class="text-xs text-on-surface-variant">Add individual costs for this vendor</span>
+				</div>
+				<button
+					onclick={addLineItem}
+					class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary bg-primary-fixed/30 hover:bg-primary-fixed/50 rounded-lg transition-colors cursor-pointer"
+				>
+					<Plus size={14} />
 					Add Item
-				</Button>
+				</button>
 			</div>
 
 			{#if formLineItems.length === 0}
-				<p class="text-sm text-charcoal/40 text-center py-4">No line items yet</p>
+				<div class="rounded-xl border border-dashed border-outline-variant/40 bg-surface-low p-8 text-center">
+					<p class="text-sm text-outline mb-1">No line items yet</p>
+					<p class="text-xs text-outline-variant">Click "Add Item" to add costs like catering per plate, setup fees, etc.</p>
+				</div>
 			{:else}
 				<div class="space-y-3">
 					{#each formLineItems as item, idx}
-						<div class="rounded-lg border border-rose-light/30 bg-cream/50 p-3 space-y-2">
+						<div class="rounded-xl border border-outline-variant/30 bg-surface-low p-4 space-y-3">
 							<div class="flex items-center justify-between">
-								<span class="text-xs text-charcoal/50 font-medium">Item {idx + 1}</span>
-								<button onclick={() => removeLineItem(item.id)} class="p-1 rounded hover:bg-rose-light text-charcoal/40 hover:text-rose transition-colors cursor-pointer" aria-label="Remove line item">
-									<svg viewBox="0 0 24 24" class="w-4 h-4 fill-current"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+								<span class="text-xs text-on-surface-variant font-mono uppercase tracking-wider">Item {idx + 1}</span>
+								<button onclick={() => removeLineItem(item.id)} class="p-1 rounded-lg hover:bg-error/10 text-outline hover:text-error transition-colors cursor-pointer" aria-label="Remove line item">
+									<X size={14} />
 								</button>
 							</div>
-							<Input placeholder="Item name" bind:value={formLineItems[idx].name} />
-							<div class="grid grid-cols-3 gap-2">
-								<Input type="number" placeholder="Cost" bind:value={formLineItems[idx].cost} />
-								<Input type="number" placeholder="Qty" bind:value={formLineItems[idx].quantity} />
-								<Select bind:value={formLineItems[idx].calculation_type}>
-									<option value="flat">Flat</option>
-									<option value="per-person">Per Person</option>
-									<option value="percentage">Percentage</option>
-								</Select>
+
+							<Input label="Item Name" placeholder="e.g. Plated dinner, Setup fee, DJ package" bind:value={formLineItems[idx].name} />
+
+							<div class="grid grid-cols-2 gap-3">
+								<Input label="Unit Cost ($)" type="number" step="0.01" min="0" placeholder="0.00" bind:value={formLineItems[idx].cost} />
+								<Input label="Quantity" type="number" min="1" placeholder="1" bind:value={formLineItems[idx].quantity} />
 							</div>
-							<label class="flex items-center gap-2 text-sm text-charcoal/70 cursor-pointer">
-								<input type="checkbox" bind:checked={formLineItems[idx].included} class="rounded border-rose-light/50 text-rose focus:ring-rose/50" />
-								Included in total
+
+							<Select label="Pricing Type" bind:value={formLineItems[idx].calculation_type}>
+								<option value="flat">Flat Rate — fixed cost regardless of guest count</option>
+								<option value="per-person">Per Person — multiplied by guest count</option>
+								<option value="percentage">Percentage — calculated as % of subtotal</option>
+							</Select>
+
+							<label class="flex items-center gap-2.5 text-sm text-on-surface-variant cursor-pointer pt-1">
+								<input type="checkbox" bind:checked={formLineItems[idx].included} class="rounded border-outline-variant text-primary focus:ring-primary/50" />
+								<span>Include in cost estimate</span>
 							</label>
 						</div>
 					{/each}
@@ -362,21 +493,21 @@
 
 	{#snippet footer()}
 		<Button variant="ghost" onclick={() => { showAddModal = false; resetForm(); }}>Cancel</Button>
-		<Button onclick={handleSave} disabled={!formName.trim()}>{editingVendorId ? 'Save Changes' : 'Add Vendor'}</Button>
+		<Button onclick={handleSave} disabled={!formName.trim() || saving}>{saving ? 'Saving...' : editingVendorId ? 'Save Changes' : 'Add Vendor'}</Button>
 	{/snippet}
 </Modal>
 
 <!-- Delete Confirmation Modal -->
 <Modal open={showDeleteModal} onclose={() => { showDeleteModal = false; vendorToDelete = null; }} title="Delete Vendor">
 	{#if vendorToDelete}
-		<p class="text-charcoal">
+		<p class="text-on-surface">
 			Are you sure you want to delete <strong>{vendorToDelete.name}</strong>? This action cannot be undone.
 		</p>
 		{@const linkedVenues = vendorVenueMap.get(vendorToDelete.id) ?? []}
 		{#if linkedVenues.length > 0}
-			<div class="mt-3 p-3 bg-rose-light/30 rounded-lg">
-				<p class="text-sm text-rose font-medium">This vendor is currently used in:</p>
-				<ul class="text-sm text-charcoal/70 mt-1 list-disc list-inside">
+			<div class="mt-3 p-3 bg-error-container rounded-lg">
+				<p class="text-sm text-error font-medium">This vendor is currently used in:</p>
+				<ul class="text-sm text-on-surface-variant mt-1 list-disc list-inside">
 					{#each linkedVenues as vName}
 						<li>{vName}</li>
 					{/each}

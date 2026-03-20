@@ -8,6 +8,7 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import Input from '$lib/components/ui/Input.svelte';
 	import StarRating from '$lib/components/ui/StarRating.svelte';
+	import { MapPin, Users, Timer, UserCheck, Heart, Plus, DollarSign, TrendingUp, Calendar, Building2 } from 'lucide-svelte';
 
 	let venues = $derived(getVenues());
 	let budget = $derived(getBudget());
@@ -61,6 +62,20 @@
 
 	let budgetRemaining = $derived(budget.total_budget - lowestCost);
 
+	// Budget progress
+	let budgetSpent = $derived(lowestCost);
+	let budgetPercent = $derived(
+		budget.total_budget > 0 ? Math.min((budgetSpent / budget.total_budget) * 100, 100) : 0
+	);
+
+	// Days left calculation (placeholder wedding date)
+	let daysLeft = $derived((() => {
+		const weddingDate = new Date('2026-10-17');
+		const today = new Date();
+		const diff = weddingDate.getTime() - today.getTime();
+		return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
+	})());
+
 	// Bar chart dimensions
 	const chartWidth = 600;
 	const chartHeight = 300;
@@ -113,6 +128,27 @@
 		Array.from(new Set(stackedData.flatMap((d) => d.breakdown.map((b) => b.type))))
 	);
 
+	// Category allocation table data
+	let categoryAllocations = $derived((() => {
+		if (stackedData.length === 0) return [];
+		const catMap = new Map<string, { budgeted: number; actual: number; label: string }>();
+		for (const { breakdown } of stackedData) {
+			for (const cat of breakdown) {
+				const existing = catMap.get(cat.type);
+				if (existing) {
+					existing.actual += cat.total;
+				} else {
+					catMap.set(cat.type, { budgeted: cat.total * 1.1, actual: cat.total, label: cat.label });
+				}
+			}
+		}
+		return Array.from(catMap.entries()).map(([type, data]) => ({
+			type,
+			...data,
+			status: data.actual > data.budgeted ? 'OVER BUDGET' : data.actual >= data.budgeted * 0.9 ? 'PENDING' : 'CONFIRMED'
+		}));
+	})());
+
 	function scaleY(value: number): number {
 		return plotHeight - (value / maxBarValue) * plotHeight;
 	}
@@ -132,24 +168,22 @@
 	<title>Wedding Planner - Dashboard</title>
 </svelte:head>
 
-<div>
-	<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+<div class="min-h-screen bg-background">
+	<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
 		<!-- Header -->
-		<div class="mb-8">
-			<h1 class="text-3xl font-bold text-charcoal tracking-tight">Wedding Dashboard</h1>
-			<p class="text-charcoal/60 mt-1">Plan your perfect day, one detail at a time.</p>
+		<div class="mb-10">
+			<h1 class="text-4xl font-bold tracking-tight text-on-surface">Planning Overview</h1>
+			<p class="text-on-surface-variant mt-2">Curating your special day with precision and elegance</p>
 		</div>
 
 		{#if !hasVenues}
 			<!-- Empty State -->
 			<div class="flex flex-col items-center justify-center py-24">
-				<div class="w-24 h-24 rounded-full bg-rose-light flex items-center justify-center mb-6">
-					<svg class="w-12 h-12 text-rose" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-						<path stroke-linecap="round" stroke-linejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z" />
-					</svg>
+				<div class="w-24 h-24 rounded-full bg-primary-fixed flex items-center justify-center mb-6">
+					<Heart class="w-12 h-12 text-primary" strokeWidth={1.5} />
 				</div>
-				<h2 class="text-2xl font-semibold text-charcoal mb-2">Welcome to Your Wedding Planner</h2>
-				<p class="text-charcoal/60 text-center max-w-md mb-8">
+				<h2 class="text-2xl font-semibold text-on-surface mb-2">Welcome to Your Wedding Planner</h2>
+				<p class="text-on-surface-variant text-center max-w-md mb-8">
 					Start by adding your first venue to compare costs, track budgets, and plan every detail of your special day.
 				</p>
 				<a href="/venues">
@@ -159,119 +193,252 @@
 				</a>
 			</div>
 		{:else}
-			<!-- Summary Cards -->
+			<!-- Quick Stats Grid -->
 			<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-				{#snippet summaryCard(iconSvg: string, label: string, value: string, accent: string)}
-					<Card class="p-5">
-						<div class="flex items-start justify-between">
-							<div>
-								<p class="text-sm font-medium text-charcoal/60">{label}</p>
-								<p class="text-2xl font-bold mt-1 {accent}">{value}</p>
-							</div>
-							<div class="w-10 h-10 rounded-lg bg-rose-light/50 flex items-center justify-center shrink-0">
-								{@html iconSvg}
-							</div>
+				<!-- Venues -->
+				<div class="bg-surface-low rounded-xl p-5 border border-outline-variant/10">
+					<div class="flex items-start justify-between">
+						<div>
+							<p class="font-mono text-[10px] uppercase tracking-widest text-secondary">Venues</p>
+							<p class="text-2xl font-bold text-on-surface mt-1">{totalVenues}</p>
 						</div>
-					</Card>
-				{/snippet}
+						<div class="w-10 h-10 rounded-lg bg-primary-fixed/50 flex items-center justify-center shrink-0">
+							<MapPin class="w-5 h-5 text-primary" />
+						</div>
+					</div>
+				</div>
 
-				{@render summaryCard(
-					'<svg class="w-5 h-5 text-rose" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 3h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008z" /></svg>',
-					'Total Venues',
-					String(totalVenues),
-					'text-charcoal'
-				)}
-				{@render summaryCard(
-					'<svg class="w-5 h-5 text-rose" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" /></svg>',
-					'Average Cost',
-					formatCurrency(averageCost),
-					'text-charcoal'
-				)}
-				{@render summaryCard(
-					'<svg class="w-5 h-5 text-rose" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>',
-					'Budget Remaining',
-					formatCurrency(budgetRemaining),
-					budgetRemaining >= 0 ? 'text-sage' : 'text-red-500'
-				)}
-				{@render summaryCard(
-					'<svg class="w-5 h-5 text-rose" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" /></svg>',
-					'Guest Count',
-					String(budget.guest_count),
-					'text-charcoal'
-				)}
+				<!-- Vendors -->
+				<div class="bg-surface-low rounded-xl p-5 border border-outline-variant/10">
+					<div class="flex items-start justify-between">
+						<div>
+							<p class="font-mono text-[10px] uppercase tracking-widest text-secondary">Vendors</p>
+							<p class="text-2xl font-bold text-on-surface mt-1">{totalVenues}</p>
+						</div>
+						<div class="w-10 h-10 rounded-lg bg-secondary-container/50 flex items-center justify-center shrink-0">
+							<Users class="w-5 h-5 text-secondary" />
+						</div>
+					</div>
+				</div>
+
+				<!-- Days Left -->
+				<div class="bg-surface-low rounded-xl p-5 border border-outline-variant/10">
+					<div class="flex items-start justify-between">
+						<div>
+							<p class="font-mono text-[10px] uppercase tracking-widest text-secondary">Days Left</p>
+							<p class="text-2xl font-bold text-on-surface mt-1">{daysLeft}</p>
+						</div>
+						<div class="w-10 h-10 rounded-lg bg-tertiary-fixed/50 flex items-center justify-center shrink-0">
+							<Timer class="w-5 h-5 text-tertiary" />
+						</div>
+					</div>
+				</div>
+
+				<!-- Guest Count -->
+				<div class="bg-surface-low rounded-xl p-5 border border-outline-variant/10">
+					<div class="flex items-start justify-between">
+						<div>
+							<p class="font-mono text-[10px] uppercase tracking-widest text-secondary">Guests</p>
+							<p class="text-2xl font-bold text-on-surface mt-1">{budget.guest_count}</p>
+						</div>
+						<div class="w-10 h-10 rounded-lg bg-primary-fixed/50 flex items-center justify-center shrink-0">
+							<UserCheck class="w-5 h-5 text-primary" />
+						</div>
+					</div>
+				</div>
 			</div>
 
-			<!-- Budget Settings -->
-			<Card class="p-6 mb-8">
-				<div class="flex items-center justify-between mb-4">
-					<h2 class="text-lg font-semibold text-charcoal">Budget Settings</h2>
-					{#if !editingBudget}
-						<Button variant="outline" size="sm" onclick={startEditBudget}>
-							Edit
+			<!-- Master Budget + Venue Cost Comparison -->
+			<div class="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-8">
+				<!-- Master Budget Card -->
+				<div class="bg-surface-lowest rounded-xl p-8 border border-outline-variant/10 shadow-sm">
+					<div class="flex items-center justify-between mb-6">
+						<div>
+							<h2 class="text-lg font-semibold text-on-surface">Master Budget</h2>
+							<p class="text-sm text-on-surface-variant mt-0.5">Track your overall wedding spend</p>
+						</div>
+						<div class="w-10 h-10 rounded-lg bg-primary-fixed/50 flex items-center justify-center">
+							<DollarSign class="w-5 h-5 text-primary" />
+						</div>
+					</div>
+
+					{#if editingBudget}
+						<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+							<Input
+								label="Total Budget"
+								type="number"
+								value={editBudgetValue}
+								oninput={(e) => { editBudgetValue = Number((e.target as HTMLInputElement).value); }}
+								min="0"
+								step="1000"
+							/>
+							<Input
+								label="Guest Count"
+								type="number"
+								value={editGuestCount}
+								oninput={(e) => { editGuestCount = Number((e.target as HTMLInputElement).value); }}
+								min="0"
+								step="1"
+							/>
+						</div>
+						<div class="flex gap-2 mt-4">
+							<Button variant="primary" size="sm" onclick={saveBudget}>
+								Save
+							</Button>
+							<Button variant="ghost" size="sm" onclick={cancelEditBudget}>
+								Cancel
+							</Button>
+						</div>
+					{:else}
+						<!-- Budget totals -->
+						<div class="flex items-baseline justify-between mb-2">
+							<span class="font-mono text-[10px] uppercase tracking-widest text-on-surface-variant">Spent</span>
+							<span class="font-mono text-sm text-on-surface-variant">
+								{formatCurrency(budgetSpent)} / {formatCurrency(budget.total_budget)}
+							</span>
+						</div>
+
+						<!-- Progress bar -->
+						<div class="w-full h-3 rounded-full bg-surface overflow-hidden mb-4">
+							<div
+								class="h-full rounded-full bg-gradient-to-r from-primary to-primary-container transition-all duration-500"
+								style="width: {budgetPercent}%"
+							></div>
+						</div>
+
+						<!-- Remaining funds -->
+						<div class="flex items-center justify-between mb-6">
+							<div>
+								<p class="text-sm text-on-surface-variant">Remaining Funds</p>
+								<p class="text-2xl font-bold {budgetRemaining >= 0 ? 'text-secondary' : 'text-error'}">
+									{formatCurrency(Math.abs(budgetRemaining))}
+									{#if budgetRemaining < 0}
+										<span class="text-sm font-normal text-error">over budget</span>
+									{/if}
+								</p>
+							</div>
+							<div class="text-right">
+								<p class="text-sm text-on-surface-variant">Average per Venue</p>
+								<p class="text-lg font-semibold text-on-surface">{formatCurrency(averageCost)}</p>
+							</div>
+						</div>
+
+						<Button variant="primary" size="md" onclick={startEditBudget}>
+							Adjust Budget
 						</Button>
 					{/if}
 				</div>
 
-				{#if editingBudget}
-					<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-						<Input
-							label="Total Budget"
-							type="number"
-							value={editBudgetValue}
-							oninput={(e) => { editBudgetValue = Number((e.target as HTMLInputElement).value); }}
-							min="0"
-							step="1000"
-						/>
-						<Input
-							label="Guest Count"
-							type="number"
-							value={editGuestCount}
-							oninput={(e) => { editGuestCount = Number((e.target as HTMLInputElement).value); }}
-							min="0"
-							step="1"
-						/>
-					</div>
-					<div class="flex gap-2 mt-4">
-						<Button variant="primary" size="sm" onclick={saveBudget}>
-							Save
-						</Button>
-						<Button variant="ghost" size="sm" onclick={cancelEditBudget}>
-							Cancel
-						</Button>
-					</div>
-				{:else}
-					<div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
-						<div class="flex items-center gap-3">
-							<div class="w-10 h-10 rounded-lg bg-sage/10 flex items-center justify-center">
-								<svg class="w-5 h-5 text-sage" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-									<path stroke-linecap="round" stroke-linejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z" />
-								</svg>
-							</div>
-							<div>
-								<p class="text-sm text-charcoal/60">Total Budget</p>
-								<p class="text-xl font-semibold text-charcoal">{formatCurrency(budget.total_budget)}</p>
-							</div>
+				<!-- Venue Cost Comparison -->
+				<div class="bg-surface-lowest rounded-xl p-8 border border-outline-variant/10 shadow-sm">
+					<div class="flex items-center justify-between mb-6">
+						<div>
+							<h2 class="text-lg font-semibold text-on-surface">Venue Cost Comparison</h2>
+							<p class="text-sm text-on-surface-variant mt-0.5">Side-by-side venue pricing</p>
 						</div>
-						<div class="flex items-center gap-3">
-							<div class="w-10 h-10 rounded-lg bg-gold/10 flex items-center justify-center">
-								<svg class="w-5 h-5 text-gold" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-									<path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
-								</svg>
-							</div>
-							<div>
-								<p class="text-sm text-charcoal/60">Guest Count</p>
-								<p class="text-xl font-semibold text-charcoal">{budget.guest_count} guests</p>
-							</div>
+						<div class="w-10 h-10 rounded-lg bg-tertiary-fixed/50 flex items-center justify-center">
+							<Building2 class="w-5 h-5 text-tertiary" />
 						</div>
 					</div>
-				{/if}
-			</Card>
+
+					<div class="space-y-3">
+						{#each venueTotals as { venue, total }}
+							<a href="/venues/{venue.id}" class="block group">
+								<div class="flex items-center justify-between p-4 rounded-lg bg-surface-low hover:bg-surface transition-colors border border-outline-variant/5">
+									<div class="flex-1 min-w-0">
+										<h3 class="font-medium text-on-surface group-hover:text-primary transition-colors truncate text-sm">
+											{venue.name}
+										</h3>
+										{#if venue.location}
+											<p class="text-xs text-on-surface-variant mt-0.5 truncate flex items-center gap-1">
+												<MapPin class="w-3 h-3 shrink-0" />
+												{venue.location}
+											</p>
+										{/if}
+									</div>
+									<div class="text-right ml-4">
+										<p class="font-mono text-sm font-bold {total > budget.total_budget ? 'text-error' : 'text-on-surface'}">
+											{formatCurrency(total)}
+										</p>
+										{#if venue.rating > 0}
+											<div class="mt-1">
+												<StarRating value={venue.rating} readonly size="sm" />
+											</div>
+										{/if}
+									</div>
+								</div>
+							</a>
+						{/each}
+
+						{#if venueTotals.length === 0}
+							<p class="text-sm text-on-surface-variant text-center py-6">No venues added yet</p>
+						{/if}
+					</div>
+				</div>
+			</div>
+
+			<!-- Category Allocation Table -->
+			{#if categoryAllocations.length > 0}
+				<div class="bg-surface-lowest rounded-xl p-8 border border-outline-variant/10 shadow-sm mb-8">
+					<div class="flex items-center justify-between mb-6">
+						<div>
+							<h2 class="text-lg font-semibold text-on-surface">Category Allocation</h2>
+							<p class="text-sm text-on-surface-variant mt-0.5">Budget breakdown by category</p>
+						</div>
+						<div class="w-10 h-10 rounded-lg bg-secondary-container/50 flex items-center justify-center">
+							<TrendingUp class="w-5 h-5 text-secondary" />
+						</div>
+					</div>
+
+					<div class="overflow-x-auto">
+						<table class="w-full text-sm">
+							<thead>
+								<tr class="border-b border-outline-variant/20">
+									<th class="text-left py-3 pr-4 font-mono text-[10px] uppercase tracking-widest text-on-surface-variant">Category</th>
+									<th class="text-right py-3 px-4 font-mono text-[10px] uppercase tracking-widest text-on-surface-variant">Budgeted</th>
+									<th class="text-right py-3 px-4 font-mono text-[10px] uppercase tracking-widest text-on-surface-variant">Actual</th>
+									<th class="text-right py-3 pl-4 font-mono text-[10px] uppercase tracking-widest text-on-surface-variant">Status</th>
+								</tr>
+							</thead>
+							<tbody>
+								{#each categoryAllocations as cat}
+									<tr class="border-b border-outline-variant/10 last:border-0">
+										<td class="py-3 pr-4">
+											<div class="flex items-center gap-2">
+												<div class="w-3 h-3 rounded-sm shrink-0" style="background-color: {categoryColors[cat.type] ?? '#D4C8B8'};"></div>
+												<span class="text-on-surface capitalize">{cat.label}</span>
+											</div>
+										</td>
+										<td class="text-right py-3 px-4 font-mono text-on-surface-variant">{formatCurrency(cat.budgeted)}</td>
+										<td class="text-right py-3 px-4 font-mono text-on-surface font-medium">{formatCurrency(cat.actual)}</td>
+										<td class="text-right py-3 pl-4">
+											{#if cat.status === 'CONFIRMED'}
+												<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-mono uppercase tracking-wider bg-secondary-container/40 text-secondary font-medium">
+													Confirmed
+												</span>
+											{:else if cat.status === 'PENDING'}
+												<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-mono uppercase tracking-wider bg-tertiary-fixed/40 text-tertiary font-medium">
+													Pending
+												</span>
+											{:else}
+												<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-mono uppercase tracking-wider bg-error-container/40 text-error font-medium">
+													Over Budget
+												</span>
+											{/if}
+										</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					</div>
+				</div>
+			{/if}
 
 			<!-- Charts Section -->
 			<div class="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-8">
 				<!-- Bar Chart: Total Cost per Venue -->
-				<Card class="p-6">
-					<h2 class="text-lg font-semibold text-charcoal mb-4">Cost per Venue</h2>
+				<div class="bg-surface-lowest rounded-xl p-6 border border-outline-variant/10 shadow-sm">
+					<h2 class="text-lg font-semibold text-on-surface mb-4">Cost per Venue</h2>
 					<div class="overflow-x-auto">
 						<svg
 							viewBox="0 0 {chartWidth} {chartHeight}"
@@ -287,14 +454,16 @@
 									y1={yPos}
 									x2={chartWidth - chartPadding.right}
 									y2={yPos}
-									stroke="#E5E0D8"
+									stroke="var(--color-outline-variant)"
 									stroke-width="1"
+									opacity="0.3"
 								/>
 								<text
 									x={chartPadding.left - 8}
 									y={yPos + 4}
 									text-anchor="end"
-									class="text-[10px] fill-charcoal/50"
+									class="text-[10px]"
+									fill="var(--color-on-surface-variant)"
 								>
 									{formatCurrency(yVal)}
 								</text>
@@ -308,14 +477,15 @@
 									y1={budgetY}
 									x2={chartWidth - chartPadding.right}
 									y2={budgetY}
-									stroke="#D4A0A0"
+									stroke="var(--color-primary)"
 									stroke-width="2"
 									stroke-dasharray="6,4"
 								/>
 								<text
 									x={chartWidth - chartPadding.right}
 									y={budgetY - 6}
-									class="text-[10px] fill-rose font-medium"
+									class="text-[10px] font-medium"
+									fill="var(--color-primary)"
 									text-anchor="end"
 								>
 									Budget: {formatCurrency(budget.total_budget)}
@@ -345,7 +515,8 @@
 									x={barX + barWidth / 2}
 									y={barY - 6}
 									text-anchor="middle"
-									class="text-[9px] fill-charcoal/70 font-medium"
+									class="text-[9px] font-medium"
+									fill="var(--color-on-surface-variant)"
 								>
 									{formatCurrency(total)}
 								</text>
@@ -355,7 +526,8 @@
 									x={barX + barWidth / 2}
 									y={chartPadding.top + plotHeight + 14}
 									text-anchor="middle"
-									class="text-[10px] fill-charcoal/70"
+									class="text-[10px]"
+									fill="var(--color-on-surface-variant)"
 									transform="rotate(-25, {barX + barWidth / 2}, {chartPadding.top + plotHeight + 14})"
 								>
 									{truncateLabel(venue.name, 14)}
@@ -363,11 +535,11 @@
 							{/each}
 						</svg>
 					</div>
-				</Card>
+				</div>
 
 				<!-- Stacked Bar Chart: Cost Breakdown by Category -->
-				<Card class="p-6">
-					<h2 class="text-lg font-semibold text-charcoal mb-4">Cost Breakdown by Category</h2>
+				<div class="bg-surface-lowest rounded-xl p-6 border border-outline-variant/10 shadow-sm">
+					<h2 class="text-lg font-semibold text-on-surface mb-4">Cost Breakdown by Category</h2>
 					<div class="overflow-x-auto">
 						<svg
 							viewBox="0 0 {chartWidth} {chartHeight}"
@@ -383,14 +555,16 @@
 									y1={yPos}
 									x2={chartWidth - chartPadding.right}
 									y2={yPos}
-									stroke="#E5E0D8"
+									stroke="var(--color-outline-variant)"
 									stroke-width="1"
+									opacity="0.3"
 								/>
 								<text
 									x={chartPadding.left - 8}
 									y={yPos + 4}
 									text-anchor="end"
-									class="text-[10px] fill-charcoal/50"
+									class="text-[10px]"
+									fill="var(--color-on-surface-variant)"
 								>
 									{formatCurrency(yVal)}
 								</text>
@@ -404,7 +578,7 @@
 									y1={budgetYStacked}
 									x2={chartWidth - chartPadding.right}
 									y2={budgetYStacked}
-									stroke="#D4A0A0"
+									stroke="var(--color-primary)"
 									stroke-width="2"
 									stroke-dasharray="6,4"
 								/>
@@ -445,7 +619,8 @@
 									x={barX + barWidth / 2}
 									y={chartPadding.top + plotHeight + 14}
 									text-anchor="middle"
-									class="text-[10px] fill-charcoal/70"
+									class="text-[10px]"
+									fill="var(--color-on-surface-variant)"
 									transform="rotate(-25, {barX + barWidth / 2}, {chartPadding.top + plotHeight + 14})"
 								>
 									{truncateLabel(venue.name, 14)}
@@ -456,48 +631,132 @@
 
 					<!-- Legend -->
 					{#if allCategoryTypes.length > 0}
-						<div class="flex flex-wrap gap-x-4 gap-y-1.5 mt-4 pt-3 border-t border-rose-light/30">
+						<div class="flex flex-wrap gap-x-4 gap-y-1.5 mt-4 pt-3 border-t border-outline-variant/20">
 							{#each allCategoryTypes as catType}
 								<div class="flex items-center gap-1.5">
 									<div
 										class="w-3 h-3 rounded-sm shrink-0"
 										style="background-color: {categoryColors[catType] ?? '#D4C8B8'};"
 									></div>
-									<span class="text-[11px] text-charcoal/60 capitalize">{catType.replace(/-/g, ' ')}</span>
+									<span class="text-[11px] text-on-surface-variant capitalize">{catType.replace(/-/g, ' ')}</span>
 								</div>
 							{/each}
 						</div>
 					{/if}
-				</Card>
+				</div>
 			</div>
 
-			<!-- Quick Venue Cards -->
+			<!-- Upcoming Dates + Vendor Network -->
+			<div class="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-8">
+				<!-- Upcoming Dates -->
+				<div class="bg-surface-lowest rounded-xl p-8 border border-outline-variant/10 shadow-sm">
+					<div class="flex items-center justify-between mb-6">
+						<div>
+							<h2 class="text-lg font-semibold text-on-surface">Upcoming Dates</h2>
+							<p class="text-sm text-on-surface-variant mt-0.5">Key milestones ahead</p>
+						</div>
+						<div class="w-10 h-10 rounded-lg bg-tertiary-fixed/50 flex items-center justify-center">
+							<Calendar class="w-5 h-5 text-tertiary" />
+						</div>
+					</div>
+
+					<div class="space-y-3">
+						<div class="flex items-center gap-4 p-4 rounded-lg bg-surface-low border border-outline-variant/5">
+							<div class="w-12 h-12 rounded-lg bg-primary-fixed/60 flex flex-col items-center justify-center shrink-0">
+								<span class="text-[10px] font-mono uppercase text-primary">Oct</span>
+								<span class="text-sm font-bold text-primary">17</span>
+							</div>
+							<div>
+								<p class="font-medium text-on-surface text-sm">Wedding Day</p>
+								<p class="text-xs text-on-surface-variant">{daysLeft} days remaining</p>
+							</div>
+						</div>
+
+						{#each venues.slice(0, 3) as venue}
+							<div class="flex items-center gap-4 p-4 rounded-lg bg-surface-low border border-outline-variant/5">
+								<div class="w-12 h-12 rounded-lg bg-secondary-container/40 flex flex-col items-center justify-center shrink-0">
+									<MapPin class="w-4 h-4 text-secondary" />
+								</div>
+								<div class="flex-1 min-w-0">
+									<p class="font-medium text-on-surface text-sm truncate">{venue.name} Tour</p>
+									<p class="text-xs text-on-surface-variant">Venue visit scheduled</p>
+								</div>
+								<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-mono uppercase tracking-wider bg-tertiary-fixed/40 text-tertiary font-medium shrink-0">
+									Pending
+								</span>
+							</div>
+						{/each}
+					</div>
+				</div>
+
+				<!-- Vendor Network Performance -->
+				<div class="bg-surface-lowest rounded-xl p-8 border border-outline-variant/10 shadow-sm">
+					<div class="flex items-center justify-between mb-6">
+						<div>
+							<h2 class="text-lg font-semibold text-on-surface">Vendor Network</h2>
+							<p class="text-sm text-on-surface-variant mt-0.5">Performance overview</p>
+						</div>
+						<div class="w-10 h-10 rounded-lg bg-secondary-container/50 flex items-center justify-center">
+							<Users class="w-5 h-5 text-secondary" />
+						</div>
+					</div>
+
+					<div class="space-y-4">
+						{#each allCategoryTypes.slice(0, 5) as catType}
+							{@const catData = categoryAllocations.find(c => c.type === catType)}
+							<div>
+								<div class="flex items-center justify-between mb-1">
+									<span class="text-sm text-on-surface capitalize">{catType.replace(/-/g, ' ')}</span>
+									<span class="font-mono text-xs text-on-surface-variant">
+										{catData ? formatCurrency(catData.actual) : '--'}
+									</span>
+								</div>
+								<div class="w-full h-2 rounded-full bg-surface overflow-hidden">
+									<div
+										class="h-full rounded-full transition-all duration-500"
+										style="width: {catData && budget.total_budget > 0 ? Math.min((catData.actual / budget.total_budget) * 100 * totalVenues, 100) : 0}%; background-color: {categoryColors[catType] ?? '#D4C8B8'};"
+									></div>
+								</div>
+							</div>
+						{/each}
+
+						{#if allCategoryTypes.length === 0}
+							<p class="text-sm text-on-surface-variant text-center py-6">Add venues to see vendor breakdown</p>
+						{/if}
+					</div>
+				</div>
+			</div>
+
+			<!-- Your Venues -->
 			<div class="mb-4">
-				<h2 class="text-lg font-semibold text-charcoal">Your Venues</h2>
+				<h2 class="text-lg font-semibold text-on-surface">Your Venues</h2>
 			</div>
 			<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
 				{#each venues as venue}
 					{@const venueTotal = calculateGrandTotal(venue.cost_categories ?? [], budget.guest_count)}
 					<a href="/venues/{venue.id}" class="block group">
-						<Card hover class="p-5 h-full flex flex-col">
+						<div class="bg-surface-lowest rounded-xl border border-outline-variant/10 shadow-sm hover:shadow-md hover:border-outline-variant/20 transition-all cursor-pointer p-5 h-full flex flex-col">
 							<div class="flex items-start justify-between mb-3">
 								<div class="flex-1 min-w-0">
-									<h3 class="font-semibold text-charcoal group-hover:text-rose transition-colors truncate">
+									<h3 class="font-semibold text-on-surface group-hover:text-primary transition-colors truncate">
 										{venue.name}
 									</h3>
 									{#if venue.location}
-										<p class="text-sm text-charcoal/50 mt-0.5 truncate">{venue.location}</p>
+										<p class="text-sm text-on-surface-variant mt-0.5 truncate flex items-center gap-1">
+											<MapPin class="w-3 h-3 shrink-0" />
+											{venue.location}
+										</p>
 									{/if}
 								</div>
-								<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-rose-light/50 text-charcoal/70 ml-2 whitespace-nowrap capitalize">
+								<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-mono uppercase tracking-wider bg-primary-fixed/50 text-on-surface-variant ml-2 whitespace-nowrap capitalize">
 									{venue.venue_type.replace(/-/g, ' ')}
 								</span>
 							</div>
 
 							<div class="flex items-end justify-between mt-auto pt-2">
 								<div>
-									<p class="text-xs text-charcoal/50">Estimated Total</p>
-									<p class="text-lg font-bold {venueTotal > budget.total_budget ? 'text-red-500' : 'text-charcoal'}">
+									<p class="font-mono text-[10px] uppercase tracking-widest text-on-surface-variant">Estimated Total</p>
+									<p class="text-lg font-bold font-mono {venueTotal > budget.total_budget ? 'text-error' : 'text-on-surface'}">
 										{formatCurrency(venueTotal)}
 									</p>
 								</div>
@@ -507,22 +766,23 @@
 							</div>
 
 							{#if venue.capacity_seated > 0}
-								<p class="text-xs text-charcoal/40 mt-2">Seats {venue.capacity_seated} guests</p>
+								<p class="text-xs text-on-surface-variant/60 mt-2 flex items-center gap-1">
+									<UserCheck class="w-3 h-3" />
+									Seats {venue.capacity_seated} guests
+								</p>
 							{/if}
-						</Card>
+						</div>
 					</a>
 				{/each}
 
 				<!-- Add venue card -->
 				<a href="/venues" class="block group">
-					<Card hover class="p-5 h-full flex flex-col items-center justify-center min-h-[160px]">
-						<div class="w-12 h-12 rounded-full bg-rose-light/30 flex items-center justify-center mb-3 group-hover:bg-rose-light transition-colors">
-							<svg class="w-6 h-6 text-rose" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-								<path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-							</svg>
+					<div class="bg-surface-lowest rounded-xl border border-outline-variant/10 shadow-sm hover:shadow-md hover:border-outline-variant/20 transition-all cursor-pointer p-5 h-full flex flex-col items-center justify-center min-h-[160px]">
+						<div class="w-12 h-12 rounded-full bg-primary-fixed/30 flex items-center justify-center mb-3 group-hover:bg-primary-fixed transition-colors">
+							<Plus class="w-6 h-6 text-primary" />
 						</div>
-						<p class="text-sm font-medium text-charcoal/60 group-hover:text-rose transition-colors">Add Another Venue</p>
-					</Card>
+						<p class="text-sm font-medium text-on-surface-variant group-hover:text-primary transition-colors">Add Another Venue</p>
+					</div>
 				</a>
 			</div>
 		{/if}
