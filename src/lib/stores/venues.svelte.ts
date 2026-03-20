@@ -74,6 +74,8 @@ export async function createVenue(venueData: Partial<Venue> = {}): Promise<Venue
 		location: venueData.location || '',
 		description: '',
 		contact_info: '',
+		website: '',
+		email: '',
 		capacity_seated: 0,
 		capacity_standing: 0,
 		venue_type: venueData.venue_type || 'all-inclusive',

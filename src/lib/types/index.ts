@@ -34,8 +34,12 @@ export interface Venue {
 	id: string;
 	name: string;
 	location: string;
+	location_lat?: number | null;
+	location_lng?: number | null;
 	description: string;
 	contact_info: string;
+	website: string;
+	email: string;
 	capacity_seated: number;
 	capacity_standing: number;
 	venue_type: VenueType;

@@ -53,6 +53,7 @@
         DateStatus,
     } from "$lib/types";
     import { COST_CATEGORY_LABELS } from "$lib/types";
+    import { env } from "$env/dynamic/public";
     import Card from "$lib/components/ui/Card.svelte";
     import Button from "$lib/components/ui/Button.svelte";
     import Badge from "$lib/components/ui/Badge.svelte";
@@ -62,6 +63,9 @@
     import Modal from "$lib/components/ui/Modal.svelte";
     import StarRating from "$lib/components/ui/StarRating.svelte";
     import Tooltip from "$lib/components/ui/Tooltip.svelte";
+    import AddressAutocomplete from "$lib/components/ui/AddressAutocomplete.svelte";
+    import GoogleMap from "$lib/components/ui/GoogleMap.svelte";
+    import CopyableInput from "$lib/components/ui/CopyableInput.svelte";
     import {
         Info,
         CreditCard,
@@ -89,6 +93,7 @@
     // ── State ──
     let venue = $derived(getVenueById($page.params.id));
     let activeSection = $state("info");
+    const mapsApiKey = env.PUBLIC_GOOGLE_MAPS_API_KEY ?? "";
 
     const sections = [
         { id: "info", label: "Basic Info", icon: Info },
@@ -861,29 +866,49 @@
                                             e.currentTarget.value,
                                         )}
                                 />
-                                <Input
+                                <AddressAutocomplete
                                     label="Location"
                                     value={venue.location}
+                                    apiKey={mapsApiKey}
+                                    onplace={(place) => {
+                                        handleVenueBlur("location", place.address);
+                                        handleVenueBlur("location_lat", place.lat);
+                                        handleVenueBlur("location_lng", place.lng);
+                                    }}
                                     onblur={(e) =>
                                         handleVenueBlur(
                                             "location",
                                             e.currentTarget.value,
                                         )}
                                 />
-                                <div class="md:col-span-2">
-                                    <Textarea
-                                        label="Contact Info"
-                                        value={venue.contact_info}
-                                        rows={2}
-                                        onblur={(e) =>
-                                            handleVenueBlur(
-                                                "contact_info",
-                                                e.currentTarget.value,
-                                            )}
-                                    />
-                                </div>
+                                <CopyableInput
+                                    label="Website"
+                                    prefix="https://"
+                                    value={venue.website?.replace(/^https?:\/\//, '') ?? ''}
+                                    placeholder="www.venue.com"
+                                    href={venue.website || undefined}
+                                    onblur={(e) => {
+                                        const val = e.currentTarget.value.trim();
+                                        handleVenueBlur("website", val ? `https://${val.replace(/^https?:\/\//, '')}` : '');
+                                    }}
+                                />
+                                <CopyableInput
+                                    label="Email"
+                                    type="email"
+                                    value={venue.email ?? ''}
+                                    placeholder="contact@venue.com"
+                                    onblur={(e) => handleVenueBlur("email", e.currentTarget.value.trim())}
+                                />
                             </div>
                         </div>
+
+                        <!-- Map -->
+                        <GoogleMap
+                            lat={venue.location_lat}
+                            lng={venue.location_lng}
+                            location={venue.location}
+                            apiKey={mapsApiKey}
+                        />
 
                         <!-- Description -->
                         <div class="bg-surface-low rounded-xl p-6">

@@ -192,6 +192,8 @@ export function createDefaultVenue(): Venue {
 		location: '',
 		description: '',
 		contact_info: '',
+		website: '',
+		email: '',
 		capacity_seated: 0,
 		capacity_standing: 0,
 		venue_type: 'all-inclusive',
