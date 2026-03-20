@@ -41,7 +41,7 @@
 		)
 	);
 
-	let vendorVenueMap = $derived(() => {
+	let vendorVenueMap = $derived.by(() => {
 		const map = new Map<string, string[]>();
 		for (const venue of venues) {
 			for (const cat of venue.cost_categories ?? []) {
@@ -57,7 +57,7 @@
 		return map;
 	});
 
-	let groupedVendors = $derived(() => {
+	let groupedVendors = $derived.by(() => {
 		if (!groupByCategory) return null;
 		const groups = new Map<CostCategoryType, Vendor[]>();
 		for (const v of vendors) {
@@ -197,7 +197,7 @@
 			<Button onclick={openAddModal}>Add Your First Vendor</Button>
 		</Card>
 	{:else if groupByCategory}
-		{@const groups = groupedVendors()}
+		{@const groups = groupedVendors}
 		{#each ALL_CATEGORY_TYPES as categoryType}
 			{@const categoryVendors = groups.get(categoryType)}
 			{#if categoryVendors && categoryVendors.length > 0}
@@ -226,7 +226,7 @@
 <!-- Vendor Card Snippet -->
 {#snippet vendorCard(vendor: Vendor)}
 	{@const totalCost = vendorTotalCosts.get(vendor.id) ?? 0}
-	{@const venueNames = vendorVenueMap().get(vendor.id) ?? []}
+	{@const venueNames = vendorVenueMap.get(vendor.id) ?? []}
 	<Card hover class="flex flex-col" onclick={() => toggleExpand(vendor.id)}>
 		<div class="p-4">
 			<div class="flex items-start justify-between mb-2">
@@ -372,7 +372,7 @@
 		<p class="text-charcoal">
 			Are you sure you want to delete <strong>{vendorToDelete.name}</strong>? This action cannot be undone.
 		</p>
-		{@const linkedVenues = vendorVenueMap().get(vendorToDelete.id) ?? []}
+		{@const linkedVenues = vendorVenueMap.get(vendorToDelete.id) ?? []}
 		{#if linkedVenues.length > 0}
 			<div class="mt-3 p-3 bg-rose-light/30 rounded-lg">
 				<p class="text-sm text-rose font-medium">This vendor is currently used in:</p>
