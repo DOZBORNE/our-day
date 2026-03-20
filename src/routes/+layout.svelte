@@ -48,7 +48,7 @@
 				<div class="flex items-center justify-between h-16">
 					<a href="/" class="flex items-center gap-2.5 no-underline">
 						<Heart class="w-5 h-5 text-primary" fill="currentColor" />
-						<span class="text-xl font-semibold text-on-surface tracking-tight">Wedding Planner</span>
+						<span class="text-xl font-semibold text-on-surface tracking-tight">Our Day</span>
 					</a>
 					<div class="hidden md:flex items-center gap-8">
 						{#each navItems as item}

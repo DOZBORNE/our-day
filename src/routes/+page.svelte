@@ -165,7 +165,7 @@
 </script>
 
 <svelte:head>
-	<title>Wedding Planner - Dashboard</title>
+	<title>Our Day - Dashboard</title>
 </svelte:head>
 
 <div class="min-h-screen bg-background">
@@ -182,7 +182,7 @@
 				<div class="w-24 h-24 rounded-full bg-primary-fixed flex items-center justify-center mb-6">
 					<Heart class="w-12 h-12 text-primary" strokeWidth={1.5} />
 				</div>
-				<h2 class="text-2xl font-semibold text-on-surface mb-2">Welcome to Your Wedding Planner</h2>
+				<h2 class="text-2xl font-semibold text-on-surface mb-2">Welcome to Our Day</h2>
 				<p class="text-on-surface-variant text-center max-w-md mb-8">
 					Start by adding your first venue to compare costs, track budgets, and plan every detail of your special day.
 				</p>

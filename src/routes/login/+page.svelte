@@ -12,7 +12,7 @@
 			<div class="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-primary-container flex items-center justify-center mx-auto mb-4">
 				<Heart class="w-8 h-8 text-on-primary" fill="currentColor" />
 			</div>
-			<h1 class="text-2xl font-bold text-on-surface tracking-tight">Wedding Planner</h1>
+			<h1 class="text-2xl font-bold text-on-surface tracking-tight">Our Day</h1>
 			<p class="text-on-surface-variant text-sm mt-1">Enter access code to continue</p>
 		</div>
 
