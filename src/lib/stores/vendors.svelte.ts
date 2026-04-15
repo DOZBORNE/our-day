@@ -1,9 +1,15 @@
 import { supabase } from '$lib/supabase';
 import type { Vendor, LineItem } from '$lib/types';
 import { genId } from '$lib/utils/defaults';
+import { getCurrentUserId } from './user.svelte';
 
 let vendors = $state<Vendor[]>([]);
 let loaded = $state(false);
+
+export function resetVendorsStore() {
+	vendors = [];
+	loaded = false;
+}
 
 export function getVendors() {
 	return vendors;
@@ -22,10 +28,16 @@ export function getVendorsByCategory(category: string): Vendor[] {
 }
 
 export async function loadVendors() {
+	const userId = getCurrentUserId();
+	if (!userId) {
+		loaded = true;
+		return;
+	}
 	try {
 		const { data, error } = await supabase
 			.from('vendors')
 			.select('*, line_items(*)')
+			.eq('user_id', userId)
 			.order('created_at', { ascending: false });
 
 		if (error) {
@@ -43,6 +55,7 @@ export async function createVendor(vendor: Omit<Vendor, 'id' | 'created_at'>): P
 	const newVendor: Vendor = {
 		...vendor,
 		id: genId(),
+		user_id: getCurrentUserId(),
 		created_at: new Date().toISOString(),
 		line_items: vendor.line_items || []
 	};

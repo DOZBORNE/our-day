@@ -1,21 +1,21 @@
 import type { Actions } from './$types';
 import { redirect, fail } from '@sveltejs/kit';
-import { env } from '$env/dynamic/private';
+import { USERS } from '../../hooks.server';
 
 const COOKIE_NAME = 'wp-access';
 const COOKIE_DAYS = 90;
 
 export const actions: Actions = {
 	default: async ({ request, cookies }) => {
-		const accessCode = env.ACCESS_CODE || '';
 		const data = await request.formData();
 		const code = data.get('code')?.toString() || '';
 
-		if (code !== accessCode) {
+		const user = USERS.find((u) => u.pin === code);
+		if (!user) {
 			return fail(403, { incorrect: true });
 		}
 
-		cookies.set(COOKIE_NAME, btoa(accessCode), {
+		cookies.set(COOKIE_NAME, btoa(user.id), {
 			path: '/',
 			maxAge: COOKIE_DAYS * 24 * 60 * 60,
 			httpOnly: true,

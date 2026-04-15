@@ -5,13 +5,14 @@
     import { loadVenues, getVenuesLoaded } from "$lib/stores/venues.svelte";
     import { loadVendors, getVendorsLoaded } from "$lib/stores/vendors.svelte";
     import { loadBudget, getBudgetLoaded } from "$lib/stores/budget.svelte";
+    import { setCurrentUserId } from "$lib/stores/user.svelte";
     import PageLoader from "$lib/components/ui/PageLoader.svelte";
     import Toast from "$lib/components/ui/Toast.svelte";
     import { Tooltip } from "bits-ui";
     import {
         Heart,
         Bell,
-        UserCircle,
+        LogOut,
         Home,
         Building2,
         Users,
@@ -19,11 +20,15 @@
         BarChart3,
     } from "lucide-svelte";
 
-    let { children } = $props();
+    let { data, children } = $props();
 
-    loadVenues();
-    loadVendors();
-    loadBudget();
+    setCurrentUserId(data.userId);
+
+    if (data.userId) {
+        loadVenues();
+        loadVendors();
+        loadBudget();
+    }
 
     let allLoaded = $derived(
         getVenuesLoaded() && getVendorsLoaded() && getBudgetLoaded(),
@@ -100,11 +105,21 @@
                             >
                                 <Bell class="w-5 h-5" />
                             </button>
-                            <button
-                                class="hidden sm:block p-2 text-on-surface-variant hover:bg-surface-low rounded-lg transition-all cursor-pointer"
-                            >
-                                <UserCircle class="w-5 h-5" />
-                            </button>
+                            {#if data.userName}
+                                <span
+                                    class="hidden sm:inline text-sm text-on-surface-variant px-2"
+                                    >{data.userName}</span
+                                >
+                            {/if}
+                            <form method="POST" action="/logout">
+                                <button
+                                    type="submit"
+                                    title="Sign out"
+                                    class="p-2 text-on-surface-variant hover:bg-surface-low rounded-lg transition-all cursor-pointer"
+                                >
+                                    <LogOut class="w-5 h-5" />
+                                </button>
+                            </form>
                         </div>
                     </div>
                 </div>

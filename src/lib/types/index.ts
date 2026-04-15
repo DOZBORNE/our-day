@@ -22,6 +22,7 @@ export type DateStatus = 'available' | 'held' | 'booked';
 
 export interface Vendor {
 	id: string;
+	user_id?: string;
 	name: string;
 	category: CostCategoryType;
 	contact_info: string;
@@ -32,6 +33,7 @@ export interface Vendor {
 
 export interface Venue {
 	id: string;
+	user_id?: string;
 	name: string;
 	location: string;
 	location_lat?: number | null;
@@ -145,7 +147,7 @@ export interface PaymentMilestone {
 }
 
 export interface BudgetSettings {
-	id: string;
+	user_id: string;
 	total_budget: number;
 	guest_count: number;
 }

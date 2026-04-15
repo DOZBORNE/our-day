@@ -10,9 +10,15 @@ import type {
 	PaymentMilestone
 } from '$lib/types';
 import { genId, createDefaultCategories, createDefaultContract } from '$lib/utils/defaults';
+import { getCurrentUserId } from './user.svelte';
 
 let venues = $state<Venue[]>([]);
 let loaded = $state(false);
+
+export function resetVenuesStore() {
+	venues = [];
+	loaded = false;
+}
 
 export function getVenues() {
 	return venues;
@@ -27,6 +33,11 @@ export function getVenueById(id: string): Venue | undefined {
 }
 
 export async function loadVenues() {
+	const userId = getCurrentUserId();
+	if (!userId) {
+		loaded = true;
+		return;
+	}
 	try {
 		const { data, error } = await supabase
 			.from('venues')
@@ -39,6 +50,7 @@ export async function loadVenues() {
 				contracts(*, payment_milestones(*))
 			`
 			)
+			.eq('user_id', userId)
 			.order('created_at', { ascending: false });
 
 		if (error) {
@@ -84,6 +96,7 @@ export async function createVenue(venueData: Partial<Venue> = {}): Promise<Venue
 
 	const venue: Venue = {
 		id,
+		user_id: getCurrentUserId(),
 		name: venueData.name || 'New Venue',
 		location: venueData.location || '',
 		description: '',
